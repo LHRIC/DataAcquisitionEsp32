@@ -4,3 +4,9 @@ f:
 	idf.py -p /dev/ttyACM0 flash
 m:
 	idf.py -p /dev/ttyACM0 monitor
+t:
+	idf.py -p /dev/ttyACM0 test
+fm:
+	idf.py -p /dev/ttyACM0 flash monitor
+bfm:
+	idf.py -p /dev/ttyACM0 build flash monitor
