@@ -1,15 +1,27 @@
 #include "xbee_tx.hpp"
 #include "driver/uart.h"
+#include "esp_log.h"
 #include "freertos/idf_additions.h"
+#include "include/buffer_pool.hpp"
 #include "portmacro.h"
 
 TaskHandle_t xbee_tx_task;
 
 static void xbee_tx_cb(void *)
 {
-    printf("xbee_tx_task\n");
+    block_t *block;
+
     while (1)
+    {
+        if (xQueueReceive(xbee_queue, &block, portMAX_DELAY) == pdTRUE)
+        {
+            ESP_LOGI("xbee_tx", "wrote data to uart");
+            uart_write_bytes(UART_PORT, (const char *)block->data, block->size);
+            block_release(block);
+        }
+
         vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
 }
 
 void xbee_tx_task_start(UBaseType_t prio, UBaseType_t stackWords,
