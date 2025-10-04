@@ -7,7 +7,7 @@
 
 TaskHandle_t can_task;
 
-static inline void fanout(const uint8_t *data, uint16_t size)
+void fanout(const uint8_t *data, uint16_t size)
 {
     block_t *block;
     if (xQueueReceive(free_queue, &block, 0) != pdTRUE)
