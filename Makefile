@@ -8,5 +8,7 @@ t:
 	idf.py -p /dev/ttyACM0 test
 fm:
 	idf.py -p /dev/ttyACM0 flash monitor
+bf:
+	idf.py -p /dev/ttyACM0 build flash
 bfm:
 	idf.py -p /dev/ttyACM0 build flash monitor

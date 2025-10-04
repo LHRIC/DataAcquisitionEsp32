@@ -1,9 +1,8 @@
-#include "can.hpp"
+#include "can/can.hpp"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "freertos/idf_additions.h"
-#include "include/buffer_pool.hpp"
 #include "portmacro.h"
 
 TaskHandle_t can_task;

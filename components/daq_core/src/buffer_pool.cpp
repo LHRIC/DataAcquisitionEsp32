@@ -1,4 +1,4 @@
-#include "buffer_pool.hpp"
+#include "daq_core/buffer_pool.hpp"
 #include "FreeRTOSConfig.h"
 #include "esp_assert.h"
 #include "freertos/FreeRTOS.h"

@@ -1,8 +1,7 @@
-#include "xbee_tx.hpp"
-#include "driver/uart.h"
+#include "xbee/xbee_tx_task.hpp"
 #include "esp_log.h"
 #include "freertos/idf_additions.h"
-#include "include/buffer_pool.hpp"
+#include "freertos/task.h"
 #include "portmacro.h"
 
 TaskHandle_t xbee_tx_task;
