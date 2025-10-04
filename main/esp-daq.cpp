@@ -7,6 +7,7 @@ extern "C" void app_main(void)
 {
     uart_init(false);
     pool_init();
+    twai_init();
 
     // xbee_rx_task_start(6, 4096, 1);
     xbee_tx_task_start(6, 4096, 1);

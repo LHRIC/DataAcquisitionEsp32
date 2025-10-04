@@ -15,5 +15,5 @@ static const char *TAG = "XBEE";
 #define RTS_PIN UART_PIN_NO_CHANGE
 #define CTS_PIN UART_PIN_NO_CHANGE
 
-static QueueHandle_t rx_queue;
+QueueHandle_t rx_queue;
 void uart_init(bool hw_flow_control_on);

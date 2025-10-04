@@ -1,0 +1,10 @@
+idf_component_register(
+  SRCS
+    "src/twai.cpp"
+  INCLUDE_DIRS
+    "include"
+  REQUIRES
+    driver
+    freertos
+    daq_core
+)
