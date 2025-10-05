@@ -1,14 +1,13 @@
-#include "can.hpp"
+#include "can/can.hpp"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "freertos/idf_additions.h"
-#include "include/buffer_pool.hpp"
 #include "portmacro.h"
 
 TaskHandle_t can_task;
 
-static inline void fanout(const uint8_t *data, uint16_t size)
+void fanout(const uint8_t *data, uint16_t size)
 {
     block_t *block;
     if (xQueueReceive(free_queue, &block, 0) != pdTRUE)

@@ -1,12 +1,7 @@
-#include "freertos/idf_additions.h"
-#include "freertos/task.h"
-#include "include/buffer_pool.hpp"
-#include "include/xbee.hpp"
-#include "tasks/can.hpp"
-#include "tasks/control.hpp"
-#include "tasks/sd.hpp"
-#include "tasks/xbee_rx.hpp"
-#include "tasks/xbee_tx.hpp"
+#include "can/can.hpp"
+#include "daq_core/buffer_pool.hpp"
+#include "xbee/uart.hpp"
+#include "xbee/xbee_tx_task.hpp"
 
 extern "C" void app_main(void)
 {

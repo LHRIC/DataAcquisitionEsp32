@@ -20,6 +20,7 @@
     in
     {
       devShells.${system}.default = pkgs.mkShell {
+        name = "esp";
         packages = with pkgs; [
           esp-idf-full
           cmake

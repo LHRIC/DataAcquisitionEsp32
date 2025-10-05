@@ -1,0 +1,12 @@
+idf_component_register(
+  SRCS
+    "src/uart.cpp"
+    "src/xbee_tx_task.cpp"
+    "src/xbee_rx_task.cpp"
+  INCLUDE_DIRS
+    "include"
+  REQUIRES
+    driver
+    freertos
+    daq_core
+)

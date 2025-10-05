@@ -1,4 +1,4 @@
-#include "xbee.hpp"
+#include "xbee/uart.hpp"
 #include "hal/uart_types.h"
 
 // Configure and initialize UART
