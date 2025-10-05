@@ -1,12 +1,13 @@
 #include "can/can.hpp"
 #include "daq_core/buffer_pool.hpp"
+#include "twai/twai.hpp"
 #include "xbee/uart.hpp"
 #include "xbee/xbee_tx_task.hpp"
 
 extern "C" void app_main(void)
 {
-    uart_init(false);
     pool_init();
+    uart_init(false);
     twai_init();
 
     // xbee_rx_task_start(6, 4096, 1);

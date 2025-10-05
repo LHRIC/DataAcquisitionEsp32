@@ -7,4 +7,5 @@ idf_component_register(
     driver
     freertos
     daq_core
+    twai
 )

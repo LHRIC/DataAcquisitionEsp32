@@ -27,6 +27,8 @@ static bool twai_rx_cb(twai_node_handle_t node_handle,
 
 void twai_init()
 {
+    twai_queue = xQueueCreate(100, 100);
+
     twai_node_handle_t node_handle = NULL;
     twai_onchip_node_config_t node_config = {};
 

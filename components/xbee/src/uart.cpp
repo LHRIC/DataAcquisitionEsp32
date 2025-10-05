@@ -1,11 +1,16 @@
 #include "xbee/uart.hpp"
+#include "freertos/idf_additions.h"
 #include "hal/uart_types.h"
+
+QueueHandle_t rx_queue = nullptr;
 
 // Configure and initialize UART
 //
 // Parity off, CTS/RTS on, with an RX event queue
 void uart_init(bool hw_flow_control_on)
 {
+    rx_queue = xQueueCreate(100, 100);
+
     const uart_config_t cfg = {
         .baud_rate = UART_BAUD,
         .data_bits = UART_DATA_8_BITS,

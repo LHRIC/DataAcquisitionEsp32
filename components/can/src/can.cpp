@@ -4,6 +4,7 @@
 #include "esp_random.h"
 #include "freertos/idf_additions.h"
 #include "portmacro.h"
+#include "twai/twai.hpp"
 
 TaskHandle_t can_task;
 
