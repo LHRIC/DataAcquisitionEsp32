@@ -15,9 +15,9 @@ static void xbee_tx_cb(void *)
     {
         if (xQueueReceive(xbee_queue, &block, portMAX_DELAY) == pdTRUE)
         {
-            ESP_LOGI("xbee_tx", "wrote data to uart");
             uart_write_bytes(UART_PORT, (const char *)block->data, block->size);
             block_release(block);
+            ESP_LOGI("xbee_tx", "wrote data to uart");
         }
 
         vTaskDelay(100 / portTICK_PERIOD_MS);
