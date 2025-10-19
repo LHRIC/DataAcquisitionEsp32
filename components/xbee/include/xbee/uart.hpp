@@ -1,6 +1,7 @@
 #pragma once
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_log.h"
 #include "freertos/idf_additions.h"
 
 static const char *TAG = "XBEE";
@@ -10,8 +11,8 @@ static const char *TAG = "XBEE";
 #define TX_BUFFER_SIZE 1024
 
 // TODO: figure out real pins
-#define TXD_PIN (GPIO_NUM_17)
 #define RXD_PIN (GPIO_NUM_16)
+#define TXD_PIN (GPIO_NUM_17)
 #define RTS_PIN UART_PIN_NO_CHANGE
 #define CTS_PIN UART_PIN_NO_CHANGE
 

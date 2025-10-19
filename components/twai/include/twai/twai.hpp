@@ -1,4 +1,6 @@
 #pragma once
+#include "daq_core/buffer_pool.hpp"
+#include "esp_log.h"
 #include "esp_twai.h"
 #include "esp_twai_onchip.h"
 #include "esp_twai_types.h"
