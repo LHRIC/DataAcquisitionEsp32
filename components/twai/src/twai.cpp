@@ -35,15 +35,21 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t node_handle,
     if (twai_node_receive_from_isr(node_handle, &rx) != ESP_OK)
     {
         // Return buffer if RX failed
+        block_release(block);
         (void)xQueueSendFromISR(free_queue, &block, &hpw);
         portYIELD_FROM_ISR(hpw);
-        return true;
+        return false;
     }
 
     block->size = rx.buffer_len;
-    block->refcnt = 1;
 
-    xQueueSendFromISR(twai_queue, &block, &hpw);
+    if (xQueueSendFromISR(twai_queue, &block, &hpw) != pdTRUE)
+    {
+        block_release(block);
+        (void)xQueueSendFromISR(free_queue, &block, &hpw);
+        portYIELD_FROM_ISR(hpw);
+        return false;
+    }
 
     portYIELD_FROM_ISR(hpw);
     return true;
@@ -58,7 +64,7 @@ bool IRAM_ATTR twai_err_cb(twai_node_handle_t handle,
         "stuff_err=%d form_err=%d\n",
         (int)err->err_flags.val, (int)err->err_flags.bit_err,
         (int)err->err_flags.ack_err, (int)err->err_flags.arb_lost,
-        (int)err->err_flags.form_err, (int)err->err_flags.stuff_err);
+        (int)err->err_flags.stuff_err, (int)err->err_flags.form_err);
 
     portYIELD_FROM_ISR(hpw);
     return true;

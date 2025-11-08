@@ -32,7 +32,7 @@ void pool_init(void);
 void block_acquire(block_t *block);
 
 /*
- * @brief Releases a block, decrementing its defcnt
+ * @brief Releases a block, decrementing its refcnt
  *
  * If the block's refcnt drops to 0, the block will also be freed.
  * This means that it will be added back to the free queue, which means

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# usage: sudo ./send_deadbeef.sh <kbps>
-# Example: sudo ./send_deadbeef.sh 100   # send at rate matching ~100 kbps bus load
+# usage: sudo ./send_can.sh <kbps>
+# Example: sudo ./send_can.sh 100   # send at rate matching ~100 kbps bus load
 
 set -euo pipefail
 

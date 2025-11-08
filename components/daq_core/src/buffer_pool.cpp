@@ -37,7 +37,7 @@ void block_release(block_t *block)
     if (__atomic_sub_fetch(&block->refcnt, 1, __ATOMIC_ACQ_REL) == 0)
     {
         BaseType_t ok = xQueueSend(free_queue, &block, 0);
-        ESP_LOGI("buffer_pool", "block released back to free queue");
+        ESP_LOGD("buffer_pool", "block released back to free queue");
         configASSERT(ok == pdTRUE);
     }
 }

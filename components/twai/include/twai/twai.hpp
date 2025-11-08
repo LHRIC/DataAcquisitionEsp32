@@ -10,6 +10,4 @@
 #define TWAI_RX_PIN (GPIO_NUM_5)
 
 extern QueueHandle_t twai_queue;
-static bool twai_rx_cb(twai_node_handle_t node_handle,
-                       const twai_rx_done_event_data_t *edata, void *user_ctx);
 void twai_init();
