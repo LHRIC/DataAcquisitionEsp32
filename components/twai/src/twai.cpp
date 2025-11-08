@@ -1,4 +1,5 @@
 #include "twai/twai.hpp"
+#include "daq_core/buffer_pool.hpp"
 #include "esp_err.h"
 #include "esp_twai.h"
 #include "esp_twai_types.h"
@@ -23,11 +24,14 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t node_handle,
         return false;
     }
 
+    block_acquire(block);
+
+    // TODO: pack header and data into free_queue buffer; should have 10 byte
+    // buffers to fanout
     twai_frame_header_t h = {0};
     twai_frame_t rx = {
         .header = h, .buffer = block->data, .buffer_len = sizeof(block->data)};
 
-    // Receive directly into pool block
     if (twai_node_receive_from_isr(node_handle, &rx) != ESP_OK)
     {
         // Return buffer if RX failed

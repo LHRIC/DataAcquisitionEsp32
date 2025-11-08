@@ -8,6 +8,7 @@
 
 TaskHandle_t can_task;
 
+// TODO: read as many as possible
 void fanout()
 {
     block_t *block;
@@ -18,7 +19,10 @@ void fanout()
         return;
     }
 
-    // configASSERT(block->refcnt == 0);
+    ESP_LOGI("fanout", "Received data from twai: %x%x", block->data[0],
+             block->data[1]);
+
+    configASSERT(block->refcnt == 1);
 
     // producer <- one reference while publishing
     block_acquire(block);
