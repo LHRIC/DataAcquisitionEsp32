@@ -4,23 +4,25 @@
 #include "esp_random.h"
 #include "freertos/idf_additions.h"
 #include "portmacro.h"
+#include "twai/twai.hpp"
 
 TaskHandle_t can_task;
 
-void fanout(const uint8_t *data, uint16_t size)
+// TODO: read as many as possible
+void fanout()
 {
     block_t *block;
-    if (xQueueReceive(free_queue, &block, 0) != pdTRUE)
+    if (xQueueReceive(twai_queue, &block, 0) != pdTRUE)
     {
         // no block available; drop the packet
-        ESP_LOGW("fanout", "No free blocks; dropping packet");
+        ESP_LOGW("fanout", "Getting nothing from twai");
         return;
     }
 
-    configASSERT(block->refcnt == 0);
+    ESP_LOGI("fanout", "Received data from twai: %x%x", block->data[0],
+             block->data[1]);
 
-    block->size = size;
-    memcpy(block->data, data, size);
+    configASSERT(block->refcnt == 1);
 
     // producer <- one reference while publishing
     block_acquire(block);
@@ -51,23 +53,11 @@ void fanout(const uint8_t *data, uint16_t size)
 
 static void can_cb(void *)
 {
-    printf("can_task\n");
     while (1)
     {
-        uint8_t payload[128];
+        fanout();
 
-        // random data and length
-        uint16_t plen = 1 + (esp_random() % sizeof(payload));
-
-        for (int i = 0; i < plen; i++)
-        {
-            payload[i] = (uint8_t)esp_random();
-        }
-
-        fanout(payload, plen);
-        ESP_LOGI("can", "fanned out payload");
-
-        vTaskDelay(300 / portTICK_PERIOD_MS);
+        vTaskDelay(30 / portTICK_PERIOD_MS);
     }
 }
 

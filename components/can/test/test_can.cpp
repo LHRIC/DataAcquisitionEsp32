@@ -99,3 +99,33 @@ TEST_CASE("fanout returns block to free list if all consumers reject",
     TEST_ASSERT_EQUAL_UINT32(POOL_SIZE,
                              uxQueueMessagesWaiting(xbee_queue)); // still full
 }
+
+TEST_CASE("test can with mocked twai data", "[can][fanout]")
+{
+    pool_init();
+
+    // Fill xbee_queue so xQueueSend(..., 0) fails
+    block_t *tmp;
+    for (int i = 0; i < POOL_SIZE; ++i)
+    {
+        // Take a free block and put it in the xbee queue
+        TEST_ASSERT_EQUAL(pdTRUE,
+                          xQueueReceive(free_queue, &tmp, to_ticks(10)));
+        TEST_ASSERT_EQUAL(pdTRUE, xQueueSend(xbee_queue, &tmp, to_ticks(10)));
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, uxQueueSpacesAvailable(xbee_queue));
+
+    UBaseType_t free_before = uxQueueMessagesWaiting(free_queue);
+    TEST_ASSERT_EQUAL_UINT32(POOL_SIZE - POOL_SIZE, free_before); // 0
+
+    uint8_t payload[3] = {1, 2, 3};
+    fanout(payload, sizeof(payload));
+
+    // fanout should:
+    // - take one block from free_queue (0 -> -1), but since no consumer took
+    // it,
+    //   it must release it back, net free_queue remains unchanged.
+    TEST_ASSERT_EQUAL_UINT32(free_before, uxQueueMessagesWaiting(free_queue));
+    TEST_ASSERT_EQUAL_UINT32(POOL_SIZE,
+                             uxQueueMessagesWaiting(xbee_queue)); // still full
+}

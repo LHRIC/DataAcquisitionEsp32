@@ -1,3 +1,8 @@
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "unity.h"
 
-TEST_CASE("test name", "[module name]") { TEST_ASSERT(1 == 1); }
+void setUp(void) {}
+void tearDown(void) {}
+
+static void test_basic(void) { TEST_ASSERT_EQUAL_INT(4, 2 + 2); }

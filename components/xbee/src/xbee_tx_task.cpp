@@ -3,6 +3,7 @@
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "portmacro.h"
+#include <cstdio>
 
 TaskHandle_t xbee_tx_task;
 
