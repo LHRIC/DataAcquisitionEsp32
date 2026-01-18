@@ -2,6 +2,8 @@
 #include "driver/i2c_master.h"
 #include "soc/clk_tree_defs.h"
 
+i2c_master_bus_handle_t i2c_bus_handle;
+
 void i2c_init()
 {
     i2c_master_bus_config_t bus_config;
@@ -11,6 +13,7 @@ void i2c_init()
     bus_config.scl_io_num = I2C_SCL_PIN;
     bus_config.glitch_ignore_cnt = 7;
     bus_config.flags.enable_internal_pullup = true;
+    bus_config.trans_queue_depth = 0;
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &i2c_bus_handle));
 }
