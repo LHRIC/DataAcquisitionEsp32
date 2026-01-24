@@ -3,11 +3,6 @@
 #include "freertos/idf_additions.h"
 #include "hal/uart_types.h"
 
-QueueHandle_t rx_queue = nullptr;
-
-// Configure and initialize UART
-//
-// Parity off, CTS/RTS on, with an RX event queue
 void uart_init(bool hw_flow_control_on)
 {
     rx_queue = xQueueCreate(100, sizeof(block_t *));
@@ -23,12 +18,9 @@ void uart_init(bool hw_flow_control_on)
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    ESP_ERROR_CHECK(uart_driver_install(UART_PORT, RX_BUFFER_SIZE,
-                                        TX_BUFFER_SIZE, 20, &rx_queue, 0));
-
     ESP_ERROR_CHECK(uart_param_config(UART_PORT, &cfg));
     ESP_ERROR_CHECK(
         uart_set_pin(UART_PORT, TXD_PIN, RXD_PIN, RTS_PIN, CTS_PIN));
-
-    ESP_LOGI("uart", "initialized uart");
+    ESP_ERROR_CHECK(uart_driver_install(UART_PORT, RX_BUFFER_SIZE,
+                                        TX_BUFFER_SIZE, 20, &rx_queue, 0));
 }

@@ -10,11 +10,10 @@ static const char *TAG = "XBEE";
 #define RX_BUFFER_SIZE 1024
 #define TX_BUFFER_SIZE 1024
 
-// TODO: figure out real pins
-#define RXD_PIN (GPIO_NUM_16)
 #define TXD_PIN (GPIO_NUM_17)
-#define RTS_PIN UART_PIN_NO_CHANGE
-#define CTS_PIN UART_PIN_NO_CHANGE
+#define RXD_PIN (GPIO_NUM_16)
+#define RTS_PIN (GPIO_NUM_7)
+#define CTS_PIN (GPIO_NUM_15)
 
 extern QueueHandle_t rx_queue;
 void uart_init(bool hw_flow_control_on);

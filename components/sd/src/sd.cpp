@@ -17,6 +17,7 @@ static void sd_cb(void *)
         if (xQueueReceive(sd_queue, &block, portMAX_DELAY) == pdTRUE)
         {
             ESP_LOGI("sd", "wrote data to sd");
+            block_release(block);
         }
         vTaskDelay(100 / portTICK_PERIOD_MS);
     }

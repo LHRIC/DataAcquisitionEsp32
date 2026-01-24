@@ -19,8 +19,6 @@ static void xbee_tx_cb(void *)
             block_release(block);
             ESP_LOGI("xbee_tx", "wrote data to uart");
         }
-
-        vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }
 
