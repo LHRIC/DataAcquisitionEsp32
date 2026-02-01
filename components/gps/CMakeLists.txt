@@ -1,6 +1,7 @@
 idf_component_register(
   SRCS
     "src/gps.cpp"
+    "src/minmea.c"
   INCLUDE_DIRS
     "include"
   REQUIRES
