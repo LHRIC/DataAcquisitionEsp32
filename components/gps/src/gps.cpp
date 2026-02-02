@@ -5,6 +5,9 @@
 #include "portmacro.h"
 #include <string.h>
 
+SemaphoreHandle_t gpsMutex;
+volatile GPSData gpsData;
+
 i2c_master_dev_handle_t gps_i2c_dev_handle;
 
 void gps_init()
@@ -24,6 +27,8 @@ void gps_init()
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 }
 
+// NOTE: This task probably doesn't need 0xFFFF stack size
+// Fix this at some point.
 void gps_task(void *pvTaskParameters)
 {
     static char buffer[0xFFFF];
@@ -48,6 +53,10 @@ void gps_task(void *pvTaskParameters)
         while (line != NULL)
         {
             int len = strlen(line);
+
+            // HACK: strtok replaces characters that minmea needs to function
+            // this is a dumb hack, but i don't wan't to write and nmea
+            // parser...
             line[len] = '\n';
             line[len + 1] = '\0';
             switch (minmea_sentence_id(line, false))
@@ -56,16 +65,21 @@ void gps_task(void *pvTaskParameters)
                 struct minmea_sentence_gga frame;
                 if (minmea_parse_gga(&frame, line))
                 {
-                    printf("Latitude: %f, Longitude: %f\n",
-                           minmea_tocoord(&frame.latitude),
-                           minmea_tocoord(&frame.longitude));
+                    xSemaphoreTake(gpsMutex, portMAX_DELAY);
+                    gpsData.latitude = minmea_tocoord(&frame.latitude);
+                    gpsData.longitude = minmea_tocoord(&frame.longitude);
+                    gpsData.time.tm_hour = frame.time.hours;
+                    gpsData.time.tm_min = frame.time.minutes;
+                    gpsData.time.tm_sec = frame.time.seconds;
+                    gpsData.updated = xTaskGetTickCount();
+                    xSemaphoreGive(gpsMutex);
                 }
-                break;
-            case MINMEA_INVALID:
                 break;
             default:
                 break;
             }
+
+            // put characters back so strtok doesn't freak out
             line[len] = '\0';
             line[len + 1] = '$';
             line = strtok(NULL, "\n");
