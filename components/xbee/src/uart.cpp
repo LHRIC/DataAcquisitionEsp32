@@ -3,6 +3,8 @@
 #include "freertos/idf_additions.h"
 #include "hal/uart_types.h"
 
+QueueHandle_t rx_queue = NULL;
+
 void uart_init(bool hw_flow_control_on)
 {
     rx_queue = xQueueCreate(100, sizeof(block_t *));

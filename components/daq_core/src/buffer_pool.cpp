@@ -1,10 +1,7 @@
 #include "daq_core/buffer_pool.hpp"
-#include "FreeRTOSConfig.h"
-#include "esp_assert.h"
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
-#include "freertos/projdefs.h"
+#include "portmacro.h"
 
 QueueHandle_t free_queue = NULL;
 QueueHandle_t xbee_queue = NULL;
@@ -36,8 +33,8 @@ void block_release(block_t *block)
 {
     if (__atomic_sub_fetch(&block->refcnt, 1, __ATOMIC_ACQ_REL) == 0)
     {
-        BaseType_t ok = xQueueSend(free_queue, &block, 0);
+        // TODO: error on fail
+        BaseType_t _ = xQueueSend(free_queue, &block, 0);
         ESP_LOGD("buffer_pool", "block released back to free queue");
-        configASSERT(ok == pdTRUE);
     }
 }

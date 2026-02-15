@@ -1,11 +1,10 @@
 #pragma once
 #include "esp_log.h"
 #include "freertos/idf_additions.h"
-#include <string.h>
 
 #define POOL_SIZE 128
 #define BLOCK_SIZE 128
-#define NUM_CONSUMERS 1
+#define NUM_CONSUMERS 2
 
 extern QueueHandle_t free_queue, xbee_queue, sd_queue;
 
