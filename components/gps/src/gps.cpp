@@ -1,8 +1,10 @@
 #include "gps/gps.hpp"
 #include "driver/i2c_master.h"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "esp_macros.h"
 #include "freertos/idf_additions.h"
+#include "i2c/i2c.hpp"
 #include "minmea.h"
 #include "portmacro.h"
 #include <string.h>
@@ -15,71 +17,35 @@ i2c_device gps_i2c_device;
 void gps_init()
 {
     ESP_ERROR_CHECK(i2c_add_device(GPS_I2C_DEVICE_ADDRESS, &gps_i2c_device));
-
     ESP_LOGI("gps", "Configured I2C");
+
+    gpsMutex = xSemaphoreCreateMutex();
+    if (gpsMutex == NULL)
+    {
+        ESP_ERROR_CHECK(ESP_FAIL);
+    }
+    ESP_LOGI("gps", "Created Mutex");
+
     gps_i2c_read_byte();
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 }
 
-// NOTE: This task probably doesn't need 0xFFFF stack size
 void gps_task(void *pvTaskParameters)
 {
     static char buffer[0xFFFF];
     while (1)
     {
-        vTaskDelay(GPS_POLLING_PERIOD_MS / portTICK_PERIOD_MS);
+        // Check available bytes
         uint16_t available = gps_i2c_available_bytes();
-        printf("Bytes available: %d", available);
 
-        while (available == 0)
-        {
-            vTaskDelay(10 / portTICK_PERIOD_MS);
-        }
+        // Read bytes to buffer
+        gps_i2c_read_datastream(buffer, available);
 
-        // Read all available GPS Messages
-        char *buffer_ptr = buffer;
-        for (int i = 0; i < available && i < 0xFFFF; i++)
-        {
-            *buffer_ptr = gps_i2c_read_byte();
-            buffer_ptr++;
-        }
-        *buffer_ptr = '\0';
+        // Scan for messages and update mutex.
+        gps_update_mutex_from_buffer(buffer);
 
-        char *line = strtok(buffer, "\n");
-        while (line != NULL)
-        {
-            int len = strlen(line);
-
-            // HACK: strtok replaces characters that minmea needs to function
-            // this is a dumb fix, but i don't wan't to write and nmea
-            // parser...
-            line[len] = '\n';
-            line[len + 1] = '\0';
-            switch (minmea_sentence_id(line, false))
-            {
-            case MINMEA_SENTENCE_GGA:
-                struct minmea_sentence_gga frame;
-                if (minmea_parse_gga(&frame, line))
-                {
-                    xSemaphoreTake(gpsMutex, portMAX_DELAY);
-                    gpsData.latitude = minmea_tocoord(&frame.latitude);
-                    gpsData.longitude = minmea_tocoord(&frame.longitude);
-                    gpsData.time.tm_hour = frame.time.hours;
-                    gpsData.time.tm_min = frame.time.minutes;
-                    gpsData.time.tm_sec = frame.time.seconds;
-                    gpsData.updated = xTaskGetTickCount();
-                    xSemaphoreGive(gpsMutex);
-                }
-                break;
-            default:
-                break;
-            }
-
-            // put characters back so strtok doesn't freak out
-            line[len] = '\0';
-            line[len + 1] = '$';
-            line = strtok(NULL, "\n");
-        }
+        // Wait until read to poll again.
+        vTaskDelay(GPS_POLLING_PERIOD_MS / portTICK_PERIOD_MS);
     }
 }
 
@@ -99,6 +65,38 @@ void gps_test()
             available--;
         }
         // printf("%c", gps_data);
+    }
+}
+
+/*
+ *  GPS Methods
+ */
+
+static void gps_update_mutex_from_buffer(char *data_buffer)
+{
+    char *line = strtok(data_buffer, "\n");
+    while (line != NULL)
+    {
+        switch (minmea_sentence_id(line, false))
+        {
+        case MINMEA_SENTENCE_GGA:
+            struct minmea_sentence_gga frame;
+            if (minmea_parse_gga(&frame, line))
+            {
+                xSemaphoreTake(gpsMutex, portMAX_DELAY);
+                gpsData.latitude = minmea_tocoord(&frame.latitude);
+                gpsData.longitude = minmea_tocoord(&frame.longitude);
+                gpsData.time.tm_hour = frame.time.hours;
+                gpsData.time.tm_min = frame.time.minutes;
+                gpsData.time.tm_sec = frame.time.seconds;
+                gpsData.updated = xTaskGetTickCount();
+                xSemaphoreGive(gpsMutex);
+            }
+            break;
+        default:
+            break;
+        }
+        line = strtok(NULL, "\n");
     }
 }
 
@@ -126,4 +124,10 @@ static uint16_t gps_i2c_available_bytes()
         ((data_buffer[0] << 8) & 0xFF00) | (data_buffer[1] & 0xFF);
 
     return available;
+}
+
+static void gps_i2c_read_datastream(char *buffer, uint16_t bytes)
+{
+    ESP_ERROR_CHECK(i2c_read_register(&gps_i2c_device, GPS_I2C_DATA_STREAM,
+                                      (uint8_t *)buffer, bytes));
 }

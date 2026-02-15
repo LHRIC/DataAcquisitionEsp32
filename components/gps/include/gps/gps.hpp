@@ -39,3 +39,5 @@ void gps_test();
 
 static uint8_t gps_i2c_read_byte();
 static uint16_t gps_i2c_available_bytes();
+static void gps_update_mutex_from_buffer(char *data_buffer);
+static void gps_i2c_read_datastream(char *buffer, uint16_t bytes);
