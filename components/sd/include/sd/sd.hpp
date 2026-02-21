@@ -5,6 +5,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+// Mount point for SD card
+static const char *MOUNT_POINT = "/sdcard";
+
 // SD card mode selection
 #define SD_USE_SDIO 1 // Set to 1 for SDIO, 0 for SPI
 

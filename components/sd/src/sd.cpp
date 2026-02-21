@@ -28,7 +28,6 @@
 #include "freertos/task.h"
 
 static const char *TAG = "sd";
-static const char *MOUNT_POINT = "/sdcard";
 
 TaskHandle_t sd_task;
 
