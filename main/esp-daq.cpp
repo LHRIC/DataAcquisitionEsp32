@@ -10,7 +10,7 @@ extern "C" void app_main(void)
 {
     pool_init();
     uart_init(false);
-    can_init();
+    twai_init();
     sd_init();
 
 

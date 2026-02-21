@@ -22,6 +22,7 @@
 #include "driver/spi_common.h"
 #endif
 #include "sdmmc_cmd.h"
+#include "sd_protocol_defs.h"
 
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -209,6 +210,8 @@ void sd_init()
         .format_if_mount_failed = false,
         .max_files = 8,
         .allocation_unit_size = 16 * 1024,
+        .disk_status_check_enable = false,
+        .use_one_fat = false,
     };
 
     esp_err_t err = esp_vfs_fat_sdmmc_mount(MOUNT_POINT, &host, &slot_cfg, &mount_cfg, &g_card);
@@ -265,6 +268,14 @@ void sd_init()
 
     ESP_LOGI(TAG, "SD mounted at %s", MOUNT_POINT);
     sdmmc_card_print_info(stdout, g_card);
+    
+    ESP_LOGI(TAG, "=== Card Details ===");
+    ESP_LOGI(TAG, "Max freq: %d kHz", g_card->max_freq_khz);
+    ESP_LOGI(TAG, "Real freq: %d kHz", g_card->real_freq_khz);
+    ESP_LOGI(TAG, "Is DDR: %d", g_card->is_ddr);
+    ESP_LOGI(TAG, "Card type: %d (0=MMC, 1=SD, 2=SDIO)", g_card->ocr & SD_OCR_SDHC_CAP ? 2 : 1);
+    ESP_LOGI(TAG, "Bus width: %d-bit", g_card->log_bus_width == 0 ? 1 : (g_card->log_bus_width == 1 ? 4 : 8));
+    ESP_LOGI(TAG, "==================");
 
     if (open_new_session_file() != ESP_OK)
     {

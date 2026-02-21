@@ -95,6 +95,7 @@ TEST_CASE("sd card write throughput", "[sd][throughput]")
     for (int i = 0; i < num_writes; i++) {
         size_t written = fwrite(buffer, 1, data_size, f);
         TEST_ASSERT_EQUAL(data_size, written);
+        fflush(f);
     }
     
     uint32_t end_tick = xTaskGetTickCount();
