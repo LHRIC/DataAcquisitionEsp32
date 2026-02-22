@@ -8,21 +8,21 @@
 
 extern "C" void app_main(void)
 {
+    ESP_LOGI("main", "Starting Data Acquisition System");
+    
     pool_init();
     uart_init(false);
     twai_init();
+    can_init();
     sd_init();
 
-
-    sd_task_start(6, 8192, 1);
-
-
-    ESP_LOGI("main", "Testing SD card...");
-    sd_test_write();
-    ESP_LOGI("main", "SD test complete, starting tasks...");
-
-    xbee_tx_task_start(6, 4096, 1);
-    can_task_start(6, 4096, 1);
+    // Start consumer tasks with HIGHER priority than producer
+    // Priority hierarchy: SD(8) > XBee(7) > CAN(6)
+    sd_task_start(8, 8192, 1);        // Highest - must drain queue fast
+    xbee_tx_task_start(7, 4096, 1);   // High - secondary consumer
+    can_task_start(6, 4096, 1);       // Lower - producer/fanout
+    
+    ESP_LOGI("main", "All tasks started");
     // xbee_rx_task_start(6, 4096, 1);
     // control_task_start(6, 4096, 1);
 }

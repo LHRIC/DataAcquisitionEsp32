@@ -33,8 +33,13 @@ void block_release(block_t *block)
 {
     if (__atomic_sub_fetch(&block->refcnt, 1, __ATOMIC_ACQ_REL) == 0)
     {
-        // TODO: error on fail
-        BaseType_t _ = xQueueSend(free_queue, &block, 0);
-        ESP_LOGD("buffer_pool", "block released back to free queue");
+        if (xQueueSend(free_queue, &block, 0) != pdTRUE)
+        {
+            ESP_LOGE("buffer_pool", "CRITICAL: Failed to return block to free_queue, memory leak");
+        }
+        else
+        {
+            ESP_LOGD("buffer_pool", "block released back to free queue");
+        }
     }
 }

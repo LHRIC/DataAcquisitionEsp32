@@ -1,12 +1,76 @@
 #include "can/can.hpp"
 #include "daq_core/buffer_pool.hpp"
-#include "driver/twai.h"
+#include "twai/twai.hpp"
 #include "esp_log.h"
 #include "freertos/idf_additions.h"
 #include "portmacro.h"
 
 TaskHandle_t can_task;
 
+/**
+ * Filter incoming CAN messages
+ * 
+ * @param block Pointer to the CAN message block
+ * @return true if message should be processed, false if it should be dropped
+ * 
+ * This function can be extended to:
+ * - Filter by CAN ID
+ * - Parse special messages (e.g., GPS time sync)
+ * - Modify message content
+ */
+static bool filter_message(block_t *block)
+{
+    // TODO: Add filtering logic here
+    // For now, accept all messages
+    return true;
+}
+
+/**
+ * Fan out a CAN message to all consumers
+ * 
+ * @param[in] block Pointer to the message block to distribute
+ * @param[out] sd_dropped Pointer to SD drop counter (incremented on drop)
+ * @param[out] xbee_dropped Pointer to XBee drop counter (incremented on drop)
+ * 
+ * Distributes the block to all consumer queues (SD, XBee) using reference counting.
+ * The block must already have one reference from the producer.
+ */
+static void fanout_to_consumers(block_t *block, uint32_t *sd_dropped, uint32_t *xbee_dropped)
+{
+    uint8_t refs = 0;
+    
+    // Producer reference while publishing
+    block_acquire(block);
+
+    if (xQueueSend(xbee_queue, &block, 0) == pdTRUE)
+    {
+        block_acquire(block);
+        refs++;
+    }
+    else
+    {
+        (*xbee_dropped)++;
+    }
+
+    if (xQueueSend(sd_queue, &block, 0) == pdTRUE)
+    {
+        block_acquire(block);
+        refs++;
+    }
+    else
+    {
+        (*sd_dropped)++;
+        if (*sd_dropped % 100 == 0)
+        {
+            ESP_LOGW("can", "sd_queue full - %lu messages dropped so far", *sd_dropped);
+        }
+    }
+
+    // Release producer's temporary reference
+    block_release(block);
+}
+
+// TODO: Deprecated function still used by test cases, clean up
 void fanout(uint8_t *payload, size_t size)
 {
     if (!payload)
@@ -34,7 +98,7 @@ void fanout(uint8_t *payload, size_t size)
     ESP_LOGI("can", "Received data from twai: %x%x", block->data[0],
              block->data[1]);
 
-    configASSERT(block->refcnt == 1);
+    configASSERT(block->refcnt == 0);
 
     // producer <- one reference while publishing
     block_acquire(block);
@@ -75,64 +139,63 @@ void fanout(uint8_t *payload, size_t size)
 
 void can_init(void)
 {
-    twai_general_config_t g_config =
-        TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_GPIO, CAN_RX_GPIO, TWAI_MODE_NORMAL);
-    g_config.rx_queue_len = 10;
-
-    twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
-    twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
-
-    ESP_ERROR_CHECK(twai_driver_install(&g_config, &t_config, &f_config));
-    ESP_ERROR_CHECK(twai_start());
-
-    ESP_LOGI("can", "TWAI driver started on TX:%d RX:%d @ 500kbps", CAN_TX_GPIO,
-             CAN_RX_GPIO);
+    ESP_LOGI("can", "CAN init - fanout component only, TWAI handles hardware");
 }
 
 /**
  * Callback for CAN task
  *
- * Retreives TWAI messages and attempts to fan them out to current consumers.
- * If there are no TWAI messages, immediately relinquish control
+ * Receives blocks from twai_queue, filters them, and fans them out to consumers (SD, XBee).
  */
 static void can_cb(void *)
 {
-    twai_message_t rx_msg;
-    uint8_t payload[8];
+    block_t *block = NULL;
+    uint32_t total_received = 0;
+    uint32_t sd_dropped = 0;
+    uint32_t xbee_dropped = 0;
+    TickType_t last_stats_time = xTaskGetTickCount();
 
-    ESP_LOGI("can", "CAN task started");
+    ESP_LOGI("can", "CAN task started - reading from twai_queue");
 
-    // continuously retreive twai messages and fan them out to consumers
     while (1)
     {
-        esp_err_t ret = twai_receive(&rx_msg, pdMS_TO_TICKS(1000));
-
-        if (ret == ESP_OK)
-        {
-            uint16_t plen = rx_msg.data_length_code;
-
-            if (plen > sizeof(payload))
-            {
-                ESP_LOGW("can", "CAN message too large: %d bytes", plen);
-                plen = sizeof(payload);
-            }
-
-            if (plen > 0)
-            {
-                memcpy(payload, rx_msg.data, plen);
-                fanout(payload, plen);
-                ESP_LOGI("can", "Received CAN ID:0x%lx len:%d",
-                         rx_msg.identifier, plen);
-            }
-        }
-        else if (ret == ESP_ERR_TIMEOUT)
+        if (xQueueReceive(twai_queue, &block, portMAX_DELAY) != pdTRUE)
         {
             continue;
         }
-        else
+
+        if (!block || block->size == 0)
         {
-            ESP_LOGW("can", "TWAI receive error: %s", esp_err_to_name(ret));
-            vTaskDelay(pdMS_TO_TICKS(100));
+            ESP_LOGW("can", "Invalid block received");
+            if (block)
+            {
+                block_release(block);
+            }
+            continue;
+        }
+
+        total_received++;
+
+        if (!filter_message(block))
+        {
+            block_release(block);
+            continue;
+        }
+
+        fanout_to_consumers(block, &sd_dropped, &xbee_dropped);
+        
+        // release original reference from twai_queue
+        block_release(block);
+        
+        // Periodic stats
+        TickType_t now = xTaskGetTickCount();
+        if ((now - last_stats_time) >= pdMS_TO_TICKS(5000))
+        {
+            UBaseType_t sd_waiting = uxQueueMessagesWaiting(sd_queue);
+            UBaseType_t xbee_waiting = uxQueueMessagesWaiting(xbee_queue);
+            ESP_LOGI("can", "Stats: recv=%lu, sd_drop=%lu (queue=%u), xbee_drop=%lu (queue=%u)",
+                    total_received, sd_dropped, sd_waiting, xbee_dropped, xbee_waiting);
+            last_stats_time = now;
         }
     }
 }

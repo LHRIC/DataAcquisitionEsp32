@@ -10,6 +10,7 @@ TaskHandle_t xbee_tx_task;
 static void xbee_tx_cb(void *)
 {
     block_t *block;
+    uint32_t sent = 0;
 
     while (1)
     {
@@ -17,7 +18,12 @@ static void xbee_tx_cb(void *)
         {
             uart_write_bytes(UART_PORT, (const char *)block->data, block->size);
             block_release(block);
-            ESP_LOGI("xbee_tx", "wrote data to uart");
+            
+            // Log progress occasionally  
+            if (++sent % 5000 == 0)
+            {
+                ESP_LOGI("xbee_tx", "Sent %lu messages", sent);
+            }
         }
     }
 }

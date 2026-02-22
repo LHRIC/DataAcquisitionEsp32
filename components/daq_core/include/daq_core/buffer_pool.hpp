@@ -2,8 +2,10 @@
 #include "esp_log.h"
 #include "freertos/idf_additions.h"
 
-#define POOL_SIZE 128
-#define BLOCK_SIZE 128
+// 4 bytes CAN ID + 8 bytes data = 12 bytes payload
+// Total block: 16 bytes (4-byte aligned for ESP32)
+#define POOL_SIZE 2048  // Increased from 1024 to handle high burst rates
+#define BLOCK_SIZE 16
 #define NUM_CONSUMERS 2
 
 extern QueueHandle_t free_queue, xbee_queue, sd_queue;
@@ -11,8 +13,9 @@ extern QueueHandle_t free_queue, xbee_queue, sd_queue;
 typedef struct
 {
     uint16_t size;
-    uint8_t data[BLOCK_SIZE];
     uint8_t refcnt;
+    uint8_t _pad;  // Padding for alignment
+    uint8_t data[BLOCK_SIZE];
 } block_t;
 
 static block_t pool[POOL_SIZE];
