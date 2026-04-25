@@ -10,12 +10,12 @@
 
 #if SD_USE_SDIO
 // SDIO mode pins (4-bit mode)
-#define SD_PIN_CLK GPIO_NUM_39
-#define SD_PIN_CMD GPIO_NUM_38
-#define SD_PIN_D0 GPIO_NUM_40
-#define SD_PIN_D1 GPIO_NUM_41
-#define SD_PIN_D2 GPIO_NUM_42
-#define SD_PIN_D3 GPIO_NUM_36
+#define SD_PIN_CLK GPIO_NUM_8
+#define SD_PIN_CMD GPIO_NUM_9
+#define SD_PIN_D0 GPIO_NUM_11
+#define SD_PIN_D1 GPIO_NUM_12
+#define SD_PIN_D2 GPIO_NUM_13
+#define SD_PIN_D3 GPIO_NUM_14
 #else
 // SPI mode pins
 #define SD_PIN_MISO GPIO_NUM_37
