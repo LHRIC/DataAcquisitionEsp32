@@ -7,4 +7,7 @@ idf_component_register(
     driver
     freertos
     daq_core
+    esp_driver_sdmmc
+    fatfs
+    sdmmc
 )

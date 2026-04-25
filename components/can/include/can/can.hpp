@@ -1,18 +1,22 @@
 #pragma once
 #include "daq_core/buffer_pool.hpp"
-#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#define CAN_TX_GPIO GPIO_NUM_5
+#define CAN_RX_GPIO GPIO_NUM_4
+
 extern TaskHandle_t can_task;
+void can_init(void);
 void can_task_start(UBaseType_t prio, UBaseType_t stackWords, BaseType_t core);
 
-/*
- * @brief Takes a block from the twai_queue and fans it out to various other
- * queues for all reaping tasks
+/**
+ * Send passed in data to consumers
  *
- * This function acquires a block that has CAN data written to it and fans
- * it out to other interested parties by writing the block pointer to their
- * queues. If no data can be sent (due to busy queues), the data is dropped.
- * This should not happen if the egress rate exceeds the ingress rate.
+ * @param payload A pointer to the buffer
+ * @param size The size of the buffer, limited to a max of BLOCK_SIZE
+ *
+ * This function takes ingress data and passes it onto customers
+ * through their queues. If ingress rate exceeds egress rate, data
+ * is dropped.
  */
-void fanout();
+void fanout(uint8_t *payload, size_t size);

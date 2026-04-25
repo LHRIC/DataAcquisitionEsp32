@@ -26,27 +26,34 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t node_handle,
 
     block_acquire(block);
 
-    // TODO: pack header and data into free_queue buffer; should have 10 byte
-    // buffers to fanout
+    // Pack header and data: [CAN_ID (4 bytes)] [DATA (up to 8 bytes)]
     twai_frame_header_t h = {0};
     twai_frame_t rx = {
-        .header = h, .buffer = block->data, .buffer_len = sizeof(block->data)};
+        .header = h, .buffer = block->data + 4, .buffer_len = 8};  // CAN max is 8 bytes
 
     if (twai_node_receive_from_isr(node_handle, &rx) != ESP_OK)
     {
-        // Return buffer if RX failed
+        // Return buffer if RX failed - release decrements refcnt back to 0
         block_release(block);
-        (void)xQueueSendFromISR(free_queue, &block, &hpw);
         portYIELD_FROM_ISR(hpw);
         return false;
     }
 
-    block->size = rx.buffer_len;
+    // Pack CAN ID in first 4 bytes (big-endian)
+    uint32_t can_id = rx.header.id;
+    block->data[0] = (can_id >> 24) & 0xFF;
+    block->data[1] = (can_id >> 16) & 0xFF;
+    block->data[2] = (can_id >> 8) & 0xFF;
+    block->data[3] = can_id & 0xFF;
+    
+    // Use DLC (Data Length Code) from header for actual data size
+    uint8_t dlc = rx.header.dlc;
+    block->size = dlc + 4;  // 4 bytes CAN ID + actual data length
 
     if (xQueueSendFromISR(twai_queue, &block, &hpw) != pdTRUE)
     {
+        // Failed to enqueue - release the block (will return to free_queue)
         block_release(block);
-        (void)xQueueSendFromISR(free_queue, &block, &hpw);
         portYIELD_FROM_ISR(hpw);
         return false;
     }
