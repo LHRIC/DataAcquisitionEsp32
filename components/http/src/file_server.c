@@ -74,6 +74,10 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
 
     /* Retrieve the base path of file storage to construct the full path */
     strlcpy(entrypath, dirpath, sizeof(entrypath));
+    if (entrypath[dirpath_len - 1] != '/') {
+        strlcat(entrypath, "/", sizeof(entrypath));
+    }
+    const size_t full_path_len = strlen(entrypath);
 
     if (!dir) {
         ESP_LOGE(TAG, "Failed to stat dir : %s", dirpath);
@@ -104,7 +108,7 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
     while ((entry = readdir(dir)) != NULL) {
         entrytype = (entry->d_type == DT_DIR ? "directory" : "file");
 
-        strlcpy(entrypath + dirpath_len, entry->d_name, sizeof(entrypath) - dirpath_len);
+        strlcpy(entrypath + full_path_len, entry->d_name, sizeof(entrypath) - full_path_len);
         if (stat(entrypath, &entry_stat) == -1) {
             ESP_LOGE(TAG, "Failed to stat %s : %s", entrytype, entry->d_name);
             continue;
@@ -141,7 +145,7 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
     httpd_resp_sendstr_chunk(req, "</body></html>");
 
     /* Send empty chunk to signal HTTP response completion */
-    httpd_resp_sendstr_chunk(req, NULL);
+    httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
 
@@ -223,10 +227,12 @@ static esp_err_t download_get_handler(httpd_req_t *req)
         } else if (strcmp(filename, "/favicon.ico") == 0) {
             return favicon_get_handler(req);
         }
-        ESP_LOGE(TAG, "Failed to stat file : %s", filepath);
-        /* Respond with 404 Not Found */
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File does not exist");
-        return ESP_FAIL;
+        
+        ESP_LOGD(TAG, "File not found: %s. Redirecting to / for captive portal.", filepath);
+        httpd_resp_set_status(req, "302 Found");
+        httpd_resp_set_hdr(req, "Location", "/");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
     }
 
     fd = fopen(filepath, "r");
@@ -253,7 +259,7 @@ static esp_err_t download_get_handler(httpd_req_t *req)
                 fclose(fd);
                 ESP_LOGE(TAG, "File sending failed!");
                 /* Abort sending file */
-                httpd_resp_sendstr_chunk(req, NULL);
+                httpd_resp_send_chunk(req, NULL, 0);
                 /* Respond with 500 Internal Server Error */
                 httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send file");
                return ESP_FAIL;
