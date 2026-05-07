@@ -1,6 +1,9 @@
 #include "can/can.hpp"
 #include "daq_core/buffer_pool.hpp"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "sd/sd.hpp"
 #include "twai/twai.hpp"
 #include "xbee/uart.hpp"
@@ -9,6 +12,29 @@
 #include "nvs_flash.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+
+static void log_ram_status(const char *phase)
+{
+    ESP_LOGI("ram", "[%s] free_heap=%u 8bit_free=%u largest_8bit=%u app_main_stack=%u",
+             phase,
+             (unsigned)esp_get_free_heap_size(),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+             (unsigned)uxTaskGetStackHighWaterMark(NULL));
+
+    if (sd_task) {
+        ESP_LOGI("ram", "[%s] sd_task_stack=%u", phase,
+                 (unsigned)uxTaskGetStackHighWaterMark(sd_task));
+    }
+    if (xbee_tx_task) {
+        ESP_LOGI("ram", "[%s] xbee_tx_task_stack=%u", phase,
+                 (unsigned)uxTaskGetStackHighWaterMark(xbee_tx_task));
+    }
+    if (can_task) {
+        ESP_LOGI("ram", "[%s] can_task_stack=%u", phase,
+                 (unsigned)uxTaskGetStackHighWaterMark(can_task));
+    }
+}
 
 extern "C" void app_main(void)
 {
@@ -24,14 +50,17 @@ extern "C" void app_main(void)
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    log_ram_status("after-net-init");
 
     pool_init();
     uart_init(false);
     twai_init();
     can_init();
+    log_ram_status("after-core-init");
     
     // Try to initialize SD card
     sd_init();
+    log_ram_status("after-sd-init");
 
     const char *base_path = MOUNT_POINT;
     if (!sd_is_ready()) {
@@ -43,12 +72,15 @@ extern "C" void app_main(void)
     }
 
     wifi_init_softap();
+    log_ram_status("after-wifi-init");
     start_file_server(base_path);
+    log_ram_status("after-file-server");
     // Start consumer tasks with HIGHER priority than producer
     // Priority hierarchy: SD(8) > XBee(7) > CAN(6)
-    sd_task_start(8, 8192, 1);        // Highest - must drain queue fast
-    xbee_tx_task_start(7, 4096, 1);   // High - secondary consumer
-    can_task_start(6, 4096, 1);       // Lower - producer/fanout
+    sd_task_start(8, 2048, 1);        // Highest - must drain queue fast
+    // xbee_tx_task_start(7, 4096, 1);   // High - secondary consumer
+    can_task_start(6, 2048, 1);       // Lower - producer/fanout
+    log_ram_status("after-task-start");
     
     ESP_LOGI("main", "All tasks started");
 }

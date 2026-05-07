@@ -21,7 +21,7 @@
 #define MAX_FILE_SIZE_STR "200KB"
 
 /* Scratch buffer size */
-#define SCRATCH_BUFSIZE  8192
+#define SCRATCH_BUFSIZE 1024 
 
 struct file_server_data {
     /* Base path of file storage */
@@ -32,6 +32,7 @@ struct file_server_data {
 };
 
 static const char *TAG = "file_server";
+static struct file_server_data server_data;
 
 /* Handler to redirect incoming GET request for /index.html to /
  * This can be overridden by uploading file with same name */
@@ -433,34 +434,34 @@ static esp_err_t delete_post_handler(httpd_req_t *req)
 /* Function to start the file server */
 esp_err_t start_file_server(const char *base_path)
 {
-    static struct file_server_data *server_data = NULL;
+    static httpd_handle_t server = NULL;
 
-    if (server_data) {
+    if (server) {
         ESP_LOGE(TAG, "File server already started");
         return ESP_ERR_INVALID_STATE;
     }
 
-    /* Allocate memory for server data */
-    server_data = calloc(1, sizeof(struct file_server_data));
-    if (!server_data) {
-        ESP_LOGE(TAG, "Failed to allocate memory for server data");
-        return ESP_ERR_NO_MEM;
-    }
-    strlcpy(server_data->base_path, base_path,
-            sizeof(server_data->base_path));
+    memset(&server_data, 0, sizeof(server_data));
+    strlcpy(server_data.base_path, base_path, sizeof(server_data.base_path));
 
-    httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
 
     /* Use the URI wildcard matching function in order to
      * allow the same handler to respond to multiple different
      * target URIs which match the wildcard scheme */
     config.uri_match_fn = httpd_uri_match_wildcard;
+    config.stack_size = 4096;
+    config.max_open_sockets = 3;
+    config.max_uri_handlers = 4;
 
-    ESP_LOGI(TAG, "Starting HTTP Server on port: '%d'", config.server_port);
-    if (httpd_start(&server, &config) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start file server!");
-        return ESP_FAIL;
+    ESP_LOGI(TAG, "Starting HTTP Server on port: '%d' stack=%u sockets=%u handlers=%u",
+             config.server_port, (unsigned)config.stack_size,
+             (unsigned)config.max_open_sockets, (unsigned)config.max_uri_handlers);
+    esp_err_t err = httpd_start(&server, &config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start file server: %s", esp_err_to_name(err));
+        server = NULL;
+        return err;
     }
 
     /* URI handler for getting uploaded files */
@@ -468,7 +469,7 @@ esp_err_t start_file_server(const char *base_path)
         .uri       = "/*",  // Match all URIs of type /path/to/file
         .method    = HTTP_GET,
         .handler   = download_get_handler,
-        .user_ctx  = server_data    // Pass server data as context
+        .user_ctx  = &server_data    // Pass server data as context
     };
     httpd_register_uri_handler(server, &file_download);
 
@@ -477,7 +478,7 @@ esp_err_t start_file_server(const char *base_path)
         .uri       = "/upload/*",   // Match all URIs of type /upload/path/to/file
         .method    = HTTP_POST,
         .handler   = upload_post_handler,
-        .user_ctx  = server_data    // Pass server data as context
+        .user_ctx  = &server_data    // Pass server data as context
     };
     httpd_register_uri_handler(server, &file_upload);
 
@@ -486,7 +487,7 @@ esp_err_t start_file_server(const char *base_path)
         .uri       = "/delete/*",   // Match all URIs of type /delete/path/to/file
         .method    = HTTP_POST,
         .handler   = delete_post_handler,
-        .user_ctx  = server_data    // Pass server data as context
+        .user_ctx  = &server_data    // Pass server data as context
     };
     httpd_register_uri_handler(server, &file_delete);
 

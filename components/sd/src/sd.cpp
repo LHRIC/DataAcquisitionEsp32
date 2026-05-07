@@ -235,7 +235,7 @@ void sd_init()
 
     // Create mutex and write task
     write_mutex = xSemaphoreCreateMutex();
-    xTaskCreatePinnedToCore(sd_write_task, "sd_writer", 8192, NULL, 5,
+    xTaskCreatePinnedToCore(sd_write_task, "sd_writer", 2048, NULL, 5,
                             &write_task_handle, 1);
 
 #if SD_USE_SDIO

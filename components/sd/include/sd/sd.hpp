@@ -31,7 +31,7 @@ extern TaskHandle_t sd_task;
 
 
 // Configuration
-#define SD_WRITE_BATCH_SIZE 1024 // 1024 records * 17 bytes = ~17KB per buffer
+#define SD_WRITE_BATCH_SIZE 512 // 1024 records * 17 bytes = ~17KB per buffer
 #define SD_FLUSH_INTERVAL_MS 50  // Flush every 50ms or when buffer full
 
 

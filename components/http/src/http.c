@@ -92,6 +92,4 @@ void wifi_init_softap(void)
 
     ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s passwordless channel:%d",
              CONFIG_ESP_WIFI_SSID, CONFIG_ESP_WIFI_CHANNEL);
-    
-    start_dns_server();
 }
