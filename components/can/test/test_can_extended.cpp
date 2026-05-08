@@ -1,8 +1,10 @@
 #include "can/can.hpp"
+#include "can/gps_time.hpp"
 #include "daq_core/buffer_pool.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "unity.h"
+#include <string.h>
 
 extern QueueHandle_t twai_queue;
 
@@ -22,6 +24,59 @@ static bool mock_twai_send(const uint8_t *data, size_t len)
     blk->size = len;
     blk->refcnt = 1;
     return xQueueSend(twai_queue, &blk, to_ticks(10)) == pdTRUE;
+}
+
+static void make_gps_mux1_payload(uint8_t *payload, uint32_t seconds_of_day,
+                                  bool fix_valid)
+{
+    memset(payload, 0, 8);
+    payload[0] = 0x01; // mux 1 in the low nibble
+    payload[4] = seconds_of_day & 0xFF;
+    payload[5] = (seconds_of_day >> 8) & 0xFF;
+    payload[6] = (seconds_of_day >> 16) & 0xFF;
+    if (fix_valid)
+    {
+        payload[7] |= 0x80;
+    }
+}
+
+TEST_CASE("gps mux1 payload anchors time of day", "[gps][time]")
+{
+    gps_time::reset();
+
+    uint8_t payload[8];
+    make_gps_mux1_payload(payload, 45296, true); // 12:34:56
+
+    TEST_ASSERT_TRUE(gps_time::update_from_can_payload(payload, sizeof(payload)));
+    TEST_ASSERT_TRUE(gps_time::has_anchor());
+
+    uint32_t sod = 0;
+    int64_t anchor_us = 0;
+    TEST_ASSERT_TRUE(gps_time::get_anchor(&sod, &anchor_us));
+    TEST_ASSERT_EQUAL_UINT32(45296, sod);
+    TEST_ASSERT_TRUE(anchor_us > 0);
+}
+
+TEST_CASE("gps anchor advances with monotonic time", "[gps][time]")
+{
+    gps_time::reset();
+
+    uint8_t payload[8];
+    make_gps_mux1_payload(payload, 86390, true);
+
+    TEST_ASSERT_TRUE(gps_time::update_from_can_payload(payload, sizeof(payload)));
+
+    timeval before = {};
+    timeval after = {};
+    TEST_ASSERT_TRUE(gps_time::get_timeval(&before));
+    vTaskDelay(pdMS_TO_TICKS(20));
+    TEST_ASSERT_TRUE(gps_time::get_timeval(&after));
+
+    TEST_ASSERT_TRUE(after.tv_sec >= before.tv_sec);
+    if (after.tv_sec == before.tv_sec)
+    {
+        TEST_ASSERT_TRUE(after.tv_usec > before.tv_usec);
+    }
 }
 
 TEST_CASE("fanout with multiple messages preserves data integrity",

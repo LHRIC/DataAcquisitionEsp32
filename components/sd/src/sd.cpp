@@ -1,4 +1,5 @@
 #include "sd/sd.hpp"
+#include "can/gps_time.hpp"
 #include "daq_core/buffer_pool.hpp"
 
 #include <errno.h>
@@ -55,6 +56,7 @@ static SemaphoreHandle_t write_mutex = NULL;
 static TaskHandle_t write_task_handle = NULL;
 static uint32_t dropped_flushes = 0;
 static uint32_t total_messages = 0;
+static uint32_t g_session_id = 0;
 
 typedef struct __attribute__((packed))
 {
@@ -66,6 +68,12 @@ typedef struct __attribute__((packed))
 // Forward declarations
 static void sd_write_task(void *arg);
 static esp_err_t flush_write_buffer();
+static bool system_time_is_set();
+static void format_first_timestamp_suffix(char *out, size_t out_sz,
+                                         uint32_t seconds_of_day);
+static void build_session_path(char *out, size_t out_sz);
+static esp_err_t ensure_session_path_current();
+static esp_err_t reopen_session_file_at(const char *new_path);
 
 static esp_err_t mkdir_p(const char *path)
 {
@@ -82,14 +90,15 @@ static void ensure_dirs_for_today_and_meta(void)
     mkdir_p("/sdcard/meta"); // for any metadata, like can id filtration
     mkdir_p("/sdcard/logs"); // for data logs
 
-    // Only create dated directories if time is set via GPS
-    time_t now = time(NULL);
-    if (now < 946684800) // Before Jan 1, 2000
+    // Only create dated directories if calendar time is available.
+    if (!system_time_is_set())
     {
+        mkdir_p("/sdcard/logs/notime");
         return; // Time not set, skip dated directories
     }
 
     // /sdcard/logs/YYYY/MM/DD
+    time_t now = time(NULL);
     struct tm tmv;
     localtime_r(&now, &tmv);
 
@@ -107,30 +116,161 @@ static void ensure_dirs_for_today_and_meta(void)
     mkdir_p(p);
 }
 
-static void make_session_path(char *out, size_t out_sz)
+static bool system_time_is_set()
 {
     time_t now = time(NULL);
-    struct tm tmv;
-    localtime_r(&now, &tmv);
+    return now >= 946684800; // Jan 1, 2000
+}
 
-    // A simple session id: random 32-bit (good enough for uniqueness per boot)
-    uint32_t sid = esp_random();
+static void format_first_timestamp_suffix(char *out, size_t out_sz,
+                                          uint32_t seconds_of_day)
+{
+    uint32_t hours = seconds_of_day / 3600;
+    uint32_t minutes = (seconds_of_day % 3600) / 60;
+    uint32_t seconds = seconds_of_day % 60;
+    snprintf(out, out_sz, "%02lu%02lu%02lu", (unsigned long)hours,
+             (unsigned long)minutes, (unsigned long)seconds);
+}
 
-    // Check if time is set (after year 2000)
-    if (now < 946684800) // Jan 1, 2000
+static void build_session_path(char *out, size_t out_sz)
+{
+    uint32_t first_seconds_of_day = 0;
+    int64_t anchor_monotonic_us = 0;
+    bool gps_has_anchor =
+        gps_time::get_anchor(&first_seconds_of_day, &anchor_monotonic_us);
+    (void)anchor_monotonic_us;
+
+    if (!system_time_is_set())
     {
-        // Time not set - create session file in root logs directory with random
-        // name
-        snprintf(out, out_sz, "/sdcard/logs/notime/session_%08lx.txt",
-                 (unsigned long)sid);
+        if (gps_has_anchor)
+        {
+            char first_ts[8] = {0};
+            format_first_timestamp_suffix(first_ts, sizeof(first_ts),
+                                          first_seconds_of_day);
+            snprintf(out, out_sz, "/sdcard/logs/notime/session_%08lx_%s.txt",
+                     (unsigned long)g_session_id, first_ts);
+        }
+        else
+        {
+            snprintf(out, out_sz, "/sdcard/logs/notime/session_%08lx.txt",
+                     (unsigned long)g_session_id);
+        }
     }
     else
     {
-        // Time is set - create proper dated path
-        snprintf(out, out_sz, "/sdcard/logs/%04d/%02d/%02d/S%08lx.txt",
+        time_t now = time(NULL);
+        struct tm tmv;
+        localtime_r(&now, &tmv);
+
+        char first_ts[8] = {0};
+        if (gps_has_anchor)
+        {
+            format_first_timestamp_suffix(first_ts, sizeof(first_ts),
+                                          first_seconds_of_day);
+        }
+        else
+        {
+            struct timeval tv;
+            gettimeofday(&tv, NULL);
+            uint32_t seconds_of_day = (uint32_t)(tv.tv_sec % 86400);
+            format_first_timestamp_suffix(first_ts, sizeof(first_ts),
+                                          seconds_of_day);
+        }
+
+        snprintf(out, out_sz, "/sdcard/logs/%04d/%02d/%02d/S%08lx_%s.txt",
                  tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
-                 (unsigned long)sid);
+                 (unsigned long)g_session_id, first_ts);
     }
+}
+
+static esp_err_t reopen_session_file_at(const char *new_path)
+{
+    if (!new_path || new_path[0] == '\0')
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (g_session)
+    {
+        fflush(g_session);
+        fclose(g_session);
+        g_session = NULL;
+    }
+
+    FILE *f = fopen(new_path, "a");
+    if (!f)
+    {
+        ESP_LOGE(TAG, "Failed to reopen session file %s (errno=%d)", new_path,
+                 errno);
+        return ESP_FAIL;
+    }
+
+    strncpy(g_session_path, new_path, sizeof(g_session_path) - 1);
+    g_session_path[sizeof(g_session_path) - 1] = '\0';
+    g_session = f;
+    ESP_LOGI(TAG, "Opened session file: %s", g_session_path);
+    return ESP_OK;
+}
+
+static esp_err_t ensure_session_path_current()
+{
+    char desired_path[sizeof(g_session_path)] = {0};
+    build_session_path(desired_path, sizeof(desired_path));
+
+    if (g_session_path[0] != '\0' && strcmp(g_session_path, desired_path) == 0)
+    {
+        return ESP_OK;
+    }
+
+    ensure_dirs_for_today_and_meta();
+
+    if (!g_session || g_session_path[0] == '\0')
+    {
+        return reopen_session_file_at(desired_path);
+    }
+
+    char old_path[sizeof(g_session_path)] = {0};
+    strncpy(old_path, g_session_path, sizeof(old_path) - 1);
+    old_path[sizeof(old_path) - 1] = '\0';
+
+    if (strcmp(old_path, desired_path) == 0)
+    {
+        return ESP_OK;
+    }
+
+    if (flush_write_buffer() != ESP_OK)
+    {
+        return ESP_OK;
+    }
+
+    int max_wait = 100;
+    while (write_pending_buffer != NULL && max_wait-- > 0)
+    {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    if (write_pending_buffer != NULL)
+    {
+        return ESP_OK;
+    }
+
+    if (g_session)
+    {
+        fflush(g_session);
+        fsync(fileno(g_session));
+    }
+
+    if (rename(old_path, desired_path) != 0)
+    {
+        ESP_LOGE(TAG, "Failed to rename session file %s -> %s (errno=%d)",
+                 old_path, desired_path, errno);
+        return ESP_OK;
+    }
+
+    strncpy(g_session_path, desired_path, sizeof(g_session_path) - 1);
+    g_session_path[sizeof(g_session_path) - 1] = '\0';
+    ESP_LOGI(TAG, "Rotated session file: %s", g_session_path);
+    return ESP_OK;
 }
 
 static void index_append_session_start(const char *session_path)
@@ -155,17 +295,13 @@ static esp_err_t open_new_session_file(void)
 
     // Always create directories and session file
     ensure_dirs_for_today_and_meta();
-    make_session_path(g_session_path, sizeof(g_session_path));
+    build_session_path(g_session_path, sizeof(g_session_path));
 
-    g_session = fopen(g_session_path, "a"); // append text mode
-    if (!g_session)
+    if (reopen_session_file_at(g_session_path) != ESP_OK)
     {
-        ESP_LOGE(TAG, "Failed to open session file %s (errno=%d)",
-                 g_session_path, errno);
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Opened session file: %s", g_session_path);
     index_append_session_start(g_session_path);
     return ESP_OK;
 }
@@ -236,6 +372,7 @@ void sd_init()
 
     // Create mutex and write task
     write_mutex = xSemaphoreCreateMutex();
+    g_session_id = esp_random();
     xTaskCreatePinnedToCore(sd_write_task, "sd_writer", 8192, NULL, 5,
                             &write_task_handle, 1);
 
@@ -363,7 +500,8 @@ void sd_init()
              g_card->log_bus_width == 0 ? 1
                                         : (g_card->log_bus_width == 1 ? 4 : 8));
 
-    // Always try to open a session file 
+    // Always try to open a session file
+    ensure_dirs_for_today_and_meta();
     if (open_new_session_file() != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to open initial session file");
@@ -590,39 +728,22 @@ esp_err_t sd_write_can_message(uint32_t can_id, const uint8_t *data, size_t len)
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Check if time is set (after Jan 1, 2000)
     struct timeval tv;
-    gettimeofday(&tv, NULL);
-    bool time_is_set = (tv.tv_sec >= 946684800);
-
-    // Check if we need to create/rotate session file
-    static int last_day = -1;
-    int current_day = -1;
-    if (time_is_set)
+    bool time_is_set = false;
+    if (system_time_is_set())
     {
-        struct tm tmv;
-        localtime_r(&tv.tv_sec, &tmv);
-        current_day = tmv.tm_mday;
+        gettimeofday(&tv, NULL);
+        time_is_set = true;
+    }
+    else if (gps_time::get_timeval(&tv))
+    {
+        time_is_set = true;
     }
 
-    // Create new session file if:
-    // 1. No session file is open yet, OR
-    // 2. Time is set AND day has changed
-    if (!g_session ||
-        (time_is_set && last_day != -1 && last_day != current_day))
+    if (ensure_session_path_current() != ESP_OK)
     {
-        // Flush any pending writes before rotating
-        flush_write_buffer();
-
-        if (open_new_session_file() == ESP_OK)
-        {
-            last_day = current_day;
-        }
-        else
-        {
-            ESP_LOGE(TAG, "Failed to open session file");
-            return ESP_FAIL;
-        }
+        ESP_LOGE(TAG, "Failed to ensure session path is current");
+        return ESP_FAIL;
     }
 
     if (!g_session)

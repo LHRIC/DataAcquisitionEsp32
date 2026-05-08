@@ -1,4 +1,5 @@
 #include "can/can.hpp"
+#include "can/gps_time.hpp"
 #include "daq_core/buffer_pool.hpp"
 #include "twai/twai.hpp"
 #include "esp_log.h"
@@ -20,7 +21,11 @@ TaskHandle_t can_task;
  */
 static bool filter_message(block_t *block)
 {
-    // TODO: Add filtering logic here
+    if (block && block->size > 4)
+    {
+        gps_time::update_from_can_payload(block->data + 4, block->size - 4);
+    }
+
     // For now, accept all messages
     return true;
 }

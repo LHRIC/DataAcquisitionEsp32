@@ -1,11 +1,13 @@
 idf_component_register(
   SRCS
     "src/can.cpp"
+    "src/gps_time.cpp"
   INCLUDE_DIRS
     "include"
   REQUIRES
     driver
     freertos
     daq_core
+    esp_timer
     twai
 )
