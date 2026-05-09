@@ -38,6 +38,7 @@ static void log_ram_status(const char *phase)
 
 extern "C" void app_main(void)
 {
+    log_stream_init();
     ESP_LOGI("main", "Starting Data Acquisition System");
     
     // Initialize NVS
@@ -77,9 +78,9 @@ extern "C" void app_main(void)
     log_ram_status("after-file-server");
     // Start consumer tasks with HIGHER priority than producer
     // Priority hierarchy: SD(8) > XBee(7) > CAN(6)
-    sd_task_start(8, 2048, 1);        // Highest - must drain queue fast
+    sd_task_start(8, 4096, 1);        // Highest - must drain queue fast
     // xbee_tx_task_start(7, 4096, 1);   // High - secondary consumer
-    can_task_start(6, 2048, 1);       // Lower - producer/fanout
+    can_task_start(6, 4096, 1);       // Lower - producer/fanout
     log_ram_status("after-task-start");
     
     ESP_LOGI("main", "All tasks started");

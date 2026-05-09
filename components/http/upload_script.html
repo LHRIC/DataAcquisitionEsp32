@@ -10,10 +10,8 @@ function upload() {
     var xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function() {
         if (xhttp.readyState == 4) {
-            if (xhttp.status == 200) {
-                document.open();
-                document.write(xhttp.responseText);
-                document.close();
+            if (xhttp.status == 200 || xhttp.status == 303) {
+                window.location.href = "/dashboard";
             } else if (xhttp.status == 0) {
                 alert("Server closed the connection abruptly!");
                 location.reload();
@@ -29,6 +27,10 @@ function upload() {
     xhttp.send(file);
 }
 </script>
+<div>
+    <a href="/">Dashboard</a> |
+    <a href="/browser/">Browser</a>
+</div>
 <div>
     <label for="newfile">Upload a file</label>
     <input id="newfile" type="file" />

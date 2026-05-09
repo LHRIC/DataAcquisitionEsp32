@@ -1,5 +1,9 @@
 #include <stdio.h>
+#include <stdarg.h>
+#include <stdbool.h>
 #include <string.h>
+#include <inttypes.h>
+#include <stdint.h>
 #include <sys/param.h>
 #include <sys/unistd.h>
 #include <sys/stat.h>
@@ -7,10 +11,18 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
+#include "esp_ota_ops.h"
+#include "esp_system.h"
+#include "esp_app_desc.h"
 
 #include "esp_vfs.h"
 #include "esp_spiffs.h"
 #include "esp_http_server.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 /* Max length a file path can have on storage */
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + CONFIG_SPIFFS_OBJ_NAME_LEN)
@@ -34,13 +46,278 @@ struct file_server_data {
 static const char *TAG = "file_server";
 static struct file_server_data server_data;
 
-/* Handler to redirect incoming GET request for /index.html to /
- * This can be overridden by uploading file with same name */
-static esp_err_t index_html_get_handler(httpd_req_t *req)
+#define LOG_STREAM_LINE_MAX 256
+#define LOG_STREAM_CAPACITY 128
+
+typedef int (*log_vprintf_fn_t)(const char *fmt, va_list ap);
+
+typedef struct {
+    uint32_t seq;
+    char line[LOG_STREAM_LINE_MAX];
+} log_stream_entry_t;
+
+static portMUX_TYPE log_stream_lock = portMUX_INITIALIZER_UNLOCKED;
+static log_stream_entry_t log_stream_buffer[LOG_STREAM_CAPACITY];
+static uint32_t log_stream_write_seq;
+static bool log_stream_ready;
+static log_vprintf_fn_t log_stream_prev_vprintf;
+
+static uint32_t log_stream_oldest_seq(void)
 {
-    httpd_resp_set_status(req, "307 Temporary Redirect");
-    httpd_resp_set_hdr(req, "Location", "/");
-    httpd_resp_send(req, NULL, 0);  // Response body can be empty
+    uint32_t write_seq;
+
+    taskENTER_CRITICAL(&log_stream_lock);
+    write_seq = log_stream_write_seq;
+    taskEXIT_CRITICAL(&log_stream_lock);
+
+    if (write_seq > LOG_STREAM_CAPACITY) {
+        return write_seq - LOG_STREAM_CAPACITY;
+    }
+    return 0;
+}
+
+static bool log_stream_pop_line(uint32_t *seq, char *line, size_t line_len)
+{
+    bool available = false;
+
+    taskENTER_CRITICAL(&log_stream_lock);
+    uint32_t write_seq = log_stream_write_seq;
+    uint32_t oldest_seq = write_seq > LOG_STREAM_CAPACITY ? write_seq - LOG_STREAM_CAPACITY : 0;
+
+    if (*seq < oldest_seq) {
+        *seq = oldest_seq;
+    }
+
+    if (*seq < write_seq) {
+        log_stream_entry_t *entry = &log_stream_buffer[*seq % LOG_STREAM_CAPACITY];
+        if (entry->seq == *seq) {
+            strlcpy(line, entry->line, line_len);
+            *seq += 1;
+            available = true;
+        } else {
+            *seq = write_seq;
+        }
+    }
+    taskEXIT_CRITICAL(&log_stream_lock);
+
+    return available;
+}
+
+static void log_stream_push_line(const char *line)
+{
+    taskENTER_CRITICAL(&log_stream_lock);
+    uint32_t seq = log_stream_write_seq++;
+    log_stream_entry_t *entry = &log_stream_buffer[seq % LOG_STREAM_CAPACITY];
+    entry->seq = seq;
+    strlcpy(entry->line, line, sizeof(entry->line));
+    taskEXIT_CRITICAL(&log_stream_lock);
+}
+
+static int mirrored_vprintf(const char *fmt, va_list ap)
+{
+    char line[LOG_STREAM_LINE_MAX];
+    va_list ap_copy;
+    va_copy(ap_copy, ap);
+    int len = vsnprintf(line, sizeof(line), fmt, ap_copy);
+    va_end(ap_copy);
+
+    if (log_stream_prev_vprintf) {
+        log_stream_prev_vprintf(fmt, ap);
+    }
+
+    if (len > 0) {
+        for (size_t i = 0; i < sizeof(line) && line[i] != '\0'; ++i) {
+            if (line[i] == '\r' || line[i] == '\n') {
+                line[i] = ' ';
+            }
+        }
+        log_stream_push_line(line);
+    }
+
+    return len;
+}
+
+void log_stream_init(void)
+{
+    if (log_stream_ready) {
+        return;
+    }
+
+    log_stream_prev_vprintf = esp_log_set_vprintf(mirrored_vprintf);
+    log_stream_ready = true;
+}
+
+static int build_status_json(char *buffer, size_t buffer_len)
+{
+    wifi_sta_list_t sta_list = {0};
+    uint16_t sta_count = 0;
+    if (esp_wifi_ap_get_sta_list(&sta_list) == ESP_OK) {
+        sta_count = sta_list.num;
+    }
+
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    uint64_t uptime_ms = (uint64_t)(esp_timer_get_time() / 1000ULL);
+
+    return snprintf(
+        buffer,
+        buffer_len,
+        "{\"uptime_ms\":%" PRIu64 ",\"free_heap\":%u,\"largest_8bit_block\":%u,"
+        "\"wifi_sta_count\":%u,\"version\":\"%s\",\"project\":\"%s\"}",
+        uptime_ms,
+        (unsigned)esp_get_free_heap_size(),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+        (unsigned)sta_count,
+        app_desc->version,
+        app_desc->project_name
+    );
+}
+
+static void delayed_restart_task(void *arg)
+{
+    uint32_t delay_ms = (uint32_t)(uintptr_t)arg;
+    vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    esp_restart();
+}
+
+static esp_err_t schedule_restart(uint32_t delay_ms)
+{
+    BaseType_t task_ok = xTaskCreate(
+        delayed_restart_task, "delayed_restart", 2048, (void *)(uintptr_t)delay_ms, 5, NULL
+    );
+    if (task_ok != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create delayed_restart task");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t status_get_handler(httpd_req_t *req)
+{
+    char payload[256];
+    int written = build_status_json(payload, sizeof(payload));
+    if (written < 0 || written >= (int)sizeof(payload)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Status payload too large");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, payload, written);
+    return ESP_OK;
+}
+
+static esp_err_t monitor_stream_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/event-stream");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    httpd_resp_set_hdr(req, "Connection", "keep-alive");
+    httpd_resp_set_hdr(req, "X-Accel-Buffering", "no");
+
+    uint32_t next_seq = log_stream_oldest_seq();
+
+    while (true) {
+        char line[LOG_STREAM_LINE_MAX];
+        bool sent_log = false;
+
+        while (log_stream_pop_line(&next_seq, line, sizeof(line))) {
+            char event_chunk[LOG_STREAM_LINE_MAX + 32];
+            int event_len = snprintf(event_chunk, sizeof(event_chunk), "event: log\ndata: %s\n\n", line);
+            if (event_len < 0 || event_len >= (int)sizeof(event_chunk)) {
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Event payload too large");
+                return ESP_FAIL;
+            }
+
+            if (httpd_resp_send_chunk(req, event_chunk, event_len) != ESP_OK) {
+                return ESP_FAIL;
+            }
+            sent_log = true;
+        }
+
+        if (!sent_log) {
+            if (httpd_resp_send_chunk(req, ": keepalive\n\n", strlen(": keepalive\n\n")) != ESP_OK) {
+                return ESP_FAIL;
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_HTTP_MONITOR_STREAM_INTERVAL_MS));
+    }
+}
+
+static esp_err_t reset_post_handler(httpd_req_t *req)
+{
+    if (schedule_restart(500) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to schedule restart");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true,\"message\":\"Restart scheduled\"}");
+    return ESP_OK;
+}
+
+static esp_err_t ota_post_handler(httpd_req_t *req)
+{
+    if (req->content_len <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body must contain firmware binary");
+        return ESP_FAIL;
+    }
+
+    const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+    if (!update_partition) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No OTA partition available");
+        return ESP_FAIL;
+    }
+
+    esp_ota_handle_t ota_handle = 0;
+    esp_err_t err = esp_ota_begin(update_partition, req->content_len, &ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA begin failed");
+        return ESP_FAIL;
+    }
+
+    int remaining = req->content_len;
+    char *buffer = ((struct file_server_data *)req->user_ctx)->scratch;
+    while (remaining > 0) {
+        int received = httpd_req_recv(req, buffer, MIN(remaining, SCRATCH_BUFSIZE));
+        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (received <= 0) {
+            esp_ota_abort(ota_handle);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA receive failed");
+            return ESP_FAIL;
+        }
+        err = esp_ota_write(ota_handle, buffer, received);
+        if (err != ESP_OK) {
+            esp_ota_abort(ota_handle);
+            ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA write failed");
+            return ESP_FAIL;
+        }
+        remaining -= received;
+    }
+
+    err = esp_ota_end(ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA finalize failed");
+        return ESP_FAIL;
+    }
+
+    err = esp_ota_set_boot_partition(update_partition);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to switch boot partition");
+        return ESP_FAIL;
+    }
+
+    if (schedule_restart(1000) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to schedule restart");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true,\"message\":\"OTA applied, restarting\"}");
     return ESP_OK;
 }
 
@@ -57,11 +334,21 @@ static esp_err_t favicon_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t dashboard_get_handler(httpd_req_t *req)
+{
+    extern const unsigned char dashboard_html_start[] asm("_binary_dashboard_html_start");
+    extern const unsigned char dashboard_html_end[] asm("_binary_dashboard_html_end");
+    const size_t dashboard_html_size = dashboard_html_end - dashboard_html_start;
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, (const char *)dashboard_html_start, dashboard_html_size);
+    return ESP_OK;
+}
+
 /* Send HTTP response with a run-time generated html consisting of
  * a list of all files and folders under the requested path.
  * In case of SPIFFS this returns empty list when path is any
  * string other than '/', since SPIFFS doesn't support directories */
-static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
+static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath, const char *uri_prefix)
 {
     char entrypath[FILE_PATH_MAX];
     char entrysize[16];
@@ -119,7 +406,7 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
 
         /* Send chunk of HTML file containing table entries with file name and size */
         httpd_resp_sendstr_chunk(req, "<tr><td><a href=\"");
-        httpd_resp_sendstr_chunk(req, req->uri);
+        httpd_resp_sendstr_chunk(req, uri_prefix);
         httpd_resp_sendstr_chunk(req, entry->d_name);
         if (entry->d_type == DT_DIR) {
             httpd_resp_sendstr_chunk(req, "/");
@@ -132,7 +419,7 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
         httpd_resp_sendstr_chunk(req, entrysize);
         httpd_resp_sendstr_chunk(req, "</td><td>");
         httpd_resp_sendstr_chunk(req, "<form method=\"post\" action=\"/delete");
-        httpd_resp_sendstr_chunk(req, req->uri);
+        httpd_resp_sendstr_chunk(req, uri_prefix);
         httpd_resp_sendstr_chunk(req, entry->d_name);
         httpd_resp_sendstr_chunk(req, "\"><button type=\"submit\">Delete</button></form>");
         httpd_resp_sendstr_chunk(req, "</td></tr>\n");
@@ -215,16 +502,31 @@ static esp_err_t download_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    if (strcmp(filename, "/") == 0 || strcmp(filename, "/index.html") == 0) {
+        return dashboard_get_handler(req);
+    }
+
+    if (strcmp(filename, "/browser") == 0) {
+        httpd_resp_set_status(req, "307 Temporary Redirect");
+        httpd_resp_set_hdr(req, "Location", "/browser/");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    if (strcmp(filename, "/browser/") == 0) {
+        return http_resp_dir_html(req, ((struct file_server_data *)req->user_ctx)->base_path, "/");
+    }
+
     /* If name has trailing '/', respond with directory contents */
     if (filename[strlen(filename) - 1] == '/') {
-        return http_resp_dir_html(req, filepath);
+        return http_resp_dir_html(req, filepath, req->uri);
     }
 
     if (stat(filepath, &file_stat) == -1) {
         /* If file not present on SPIFFS check if URI
          * corresponds to one of the hardcoded paths */
-        if (strcmp(filename, "/index.html") == 0) {
-            return index_html_get_handler(req);
+        if (strcmp(filename, "/dashboard") == 0 || strcmp(filename, "/dashboard.html") == 0) {
+            return dashboard_get_handler(req);
         } else if (strcmp(filename, "/favicon.ico") == 0) {
             return favicon_get_handler(req);
         }
@@ -383,9 +685,9 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     fclose(fd);
     ESP_LOGI(TAG, "File reception complete");
 
-    /* Redirect onto root to see the updated file list */
+    /* Redirect onto browser to see the updated file list */
     httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_set_hdr(req, "Location", "/browser/");
     httpd_resp_sendstr(req, "File uploaded successfully");
     return ESP_OK;
 }
@@ -424,9 +726,9 @@ static esp_err_t delete_post_handler(httpd_req_t *req)
     /* Delete file */
     unlink(filepath);
 
-    /* Redirect onto root to see the updated file list */
+    /* Redirect onto browser to see the updated file list */
     httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_set_hdr(req, "Location", "/browser/");
     httpd_resp_sendstr(req, "File deleted successfully");
     return ESP_OK;
 }
@@ -451,8 +753,8 @@ esp_err_t start_file_server(const char *base_path)
      * target URIs which match the wildcard scheme */
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.stack_size = 4096;
-    config.max_open_sockets = 3;
-    config.max_uri_handlers = 4;
+    config.max_open_sockets = 6;
+    config.max_uri_handlers = 8;
 
     ESP_LOGI(TAG, "Starting HTTP Server on port: '%d' stack=%u sockets=%u handlers=%u",
              config.server_port, (unsigned)config.stack_size,
@@ -464,14 +766,37 @@ esp_err_t start_file_server(const char *base_path)
         return err;
     }
 
-    /* URI handler for getting uploaded files */
-    httpd_uri_t file_download = {
-        .uri       = "/*",  // Match all URIs of type /path/to/file
-        .method    = HTTP_GET,
-        .handler   = download_get_handler,
-        .user_ctx  = &server_data    // Pass server data as context
+    httpd_uri_t status_get = {
+        .uri      = "/api/status",
+        .method   = HTTP_GET,
+        .handler  = status_get_handler,
+        .user_ctx = &server_data,
     };
-    httpd_register_uri_handler(server, &file_download);
+    httpd_register_uri_handler(server, &status_get);
+
+    httpd_uri_t monitor_stream_get = {
+        .uri      = "/api/monitor",
+        .method   = HTTP_GET,
+        .handler  = monitor_stream_get_handler,
+        .user_ctx = &server_data,
+    };
+    httpd_register_uri_handler(server, &monitor_stream_get);
+
+    httpd_uri_t reset_post = {
+        .uri      = "/api/reset",
+        .method   = HTTP_POST,
+        .handler  = reset_post_handler,
+        .user_ctx = &server_data,
+    };
+    httpd_register_uri_handler(server, &reset_post);
+
+    httpd_uri_t ota_post = {
+        .uri      = "/api/ota",
+        .method   = HTTP_POST,
+        .handler  = ota_post_handler,
+        .user_ctx = &server_data,
+    };
+    httpd_register_uri_handler(server, &ota_post);
 
     /* URI handler for uploading files to server */
     httpd_uri_t file_upload = {
@@ -490,6 +815,15 @@ esp_err_t start_file_server(const char *base_path)
         .user_ctx  = &server_data    // Pass server data as context
     };
     httpd_register_uri_handler(server, &file_delete);
+
+    /* URI handler for getting uploaded files */
+    httpd_uri_t file_download = {
+        .uri       = "/*",  // Match all URIs of type /path/to/file
+        .method    = HTTP_GET,
+        .handler   = download_get_handler,
+        .user_ctx  = &server_data    // Pass server data as context
+    };
+    httpd_register_uri_handler(server, &file_download);
 
     return ESP_OK;
 }

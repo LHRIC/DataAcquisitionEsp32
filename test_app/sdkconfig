@@ -1008,7 +1008,7 @@ CONFIG_PARTITION_TABLE_MD5=y
 # end of Partition Table
 
 #
-# HTTP file_serving example menu
+# HTTP file server menu
 #
 
 #
@@ -1024,11 +1024,13 @@ CONFIG_ESP_WIFI_CHANNEL=1
 CONFIG_ESP_MAX_STA_CONN=4
 # end of WiFi AP Configuration
 
+#
+# Remote control API
+#
 # default:
-# CONFIG_EXAMPLE_MOUNT_SD_CARD is not set
-# default:
-CONFIG_EXAMPLE_HTTPD_CONN_CLOSE_HEADER=y
-# end of HTTP file_serving example menu
+CONFIG_HTTP_MONITOR_STREAM_INTERVAL_MS=1000
+# end of Remote control API
+# end of HTTP file server menu
 
 #
 # Compiler options

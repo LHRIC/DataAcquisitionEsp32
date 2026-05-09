@@ -77,14 +77,22 @@ void wifi_init_softap(void)
             .ssid = CONFIG_ESP_WIFI_SSID,
             .ssid_len = strlen(CONFIG_ESP_WIFI_SSID),
             .channel = CONFIG_ESP_WIFI_CHANNEL,
-            .password = "",
+            .password = CONFIG_ESP_WIFI_PASSWORD,
             .max_connection = CONFIG_ESP_MAX_STA_CONN,
-            .authmode = WIFI_AUTH_OPEN,
+            .authmode = WIFI_AUTH_WPA2_PSK,
             .pmf_cfg = {
                 .required = false,
             },
         },
     };
+
+    size_t password_len = strlen(CONFIG_ESP_WIFI_PASSWORD);
+    if (password_len == 0 || password_len < 8) {
+        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+        if (password_len > 0) {
+            ESP_LOGW(TAG, "AP password is shorter than 8 chars; starting open AP");
+        }
+    }
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));

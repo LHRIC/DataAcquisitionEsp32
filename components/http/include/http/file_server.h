@@ -13,6 +13,8 @@ esp_err_t spiffs_init(const char *base_path);
 
 void wifi_init_softap(void);
 
+void log_stream_init(void);
+
 
 #ifdef __cplusplus
 }

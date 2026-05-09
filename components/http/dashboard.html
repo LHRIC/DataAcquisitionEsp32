@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ESP32 Dashboard</title>
+    <style>
+        body { font-family: sans-serif; margin: 1rem; }
+        button { margin-right: 0.5rem; }
+        pre {
+            white-space: pre-wrap;
+            background: #111;
+            color: #0f0;
+            padding: 1rem;
+            min-height: 18rem;
+            max-height: 30rem;
+            overflow: auto;
+        }
+        .row { margin: 0.75rem 0; }
+        .status { font-family: monospace; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>ESP32 Dashboard</h1>
+    <div class="row">
+        <button onclick="reloadStatus()">Refresh status</button>
+        <button onclick="resetDevice()">Reset ESP32</button>
+        <a href="/browser/">File browser</a>
+    </div>
+    <div class="row">
+        <div><strong>Status</strong></div>
+        <div id="status" class="status">Loading...</div>
+    </div>
+    <div class="row">
+        <div><strong>Log stream</strong></div>
+        <pre id="log"></pre>
+    </div>
+
+    <script>
+        let logSource = null;
+
+        function appendLog(line) {
+            const log = document.getElementById("log");
+            log.textContent += line + "\n";
+            log.scrollTop = log.scrollHeight;
+        }
+
+        async function reloadStatus() {
+            const response = await fetch("/api/status");
+            document.getElementById("status").textContent = await response.text();
+        }
+
+        async function resetDevice() {
+            const response = await fetch("/api/reset", { method: "POST" });
+            appendLog("[reset] " + response.status);
+        }
+
+        function connectLogs() {
+            if (logSource) {
+                logSource.close();
+            }
+
+            logSource = new EventSource("/api/monitor");
+            logSource.addEventListener("log", function(event) {
+                appendLog(event.data);
+            });
+            logSource.onerror = function() {};
+        }
+
+        reloadStatus();
+        connectLogs();
+    </script>
+</body>
+</html>

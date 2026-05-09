@@ -145,6 +145,48 @@ TEST_CASE("HTTP GET root returns 200 OK", "[http][endpoint]")
     esp_http_client_cleanup(client);
 }
 
+TEST_CASE("HTTP GET /browser/ returns 200 OK", "[http][endpoint]")
+{
+    ensure_server_started();
+
+    esp_http_client_config_t cfg = {
+        .url           = "http://127.0.0.1/browser/",
+        .timeout_ms    = 5000,
+        .event_handler = _http_event_handler,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    TEST_ASSERT_NOT_NULL(client);
+
+    TEST_ASSERT_EQUAL(ESP_OK, esp_http_client_perform(client));
+    TEST_ASSERT_EQUAL(200, esp_http_client_get_status_code(client));
+
+    esp_http_client_cleanup(client);
+}
+
+TEST_CASE("HTTP GET /api/status returns 200 OK and JSON", "[http][endpoint]")
+{
+    ensure_server_started();
+
+    esp_http_client_config_t cfg = {
+        .url           = "http://127.0.0.1/api/status",
+        .timeout_ms    = 5000,
+        .event_handler = _http_event_handler,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    TEST_ASSERT_NOT_NULL(client);
+
+    TEST_ASSERT_EQUAL(ESP_OK, esp_http_client_perform(client));
+    TEST_ASSERT_EQUAL(200, esp_http_client_get_status_code(client));
+
+    char body[256] = {0};
+    int read = esp_http_client_read_response(client, body, sizeof(body) - 1);
+    TEST_ASSERT_TRUE(read > 0);
+    TEST_ASSERT_NOT_EQUAL(NULL, strstr(body, "\"uptime_ms\""));
+    TEST_ASSERT_NOT_EQUAL(NULL, strstr(body, "\"free_heap\""));
+
+    esp_http_client_cleanup(client);
+}
+
 TEST_CASE("HTTP GET non-existent file returns 404", "[http][endpoint]")
 {
     ensure_server_started();
@@ -281,4 +323,21 @@ TEST_CASE("HTTP POST delete non-existent file returns 400", "[http][endpoint]")
     esp_http_client_cleanup(client);
 }
 
+TEST_CASE("HTTP POST /api/ota without body returns 400", "[http][endpoint]")
+{
+    ensure_server_started();
 
+    esp_http_client_config_t cfg = {
+        .url           = "http://127.0.0.1/api/ota",
+        .method        = HTTP_METHOD_POST,
+        .timeout_ms    = 5000,
+        .event_handler = _http_event_handler,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    TEST_ASSERT_NOT_NULL(client);
+
+    TEST_ASSERT_EQUAL(ESP_OK, esp_http_client_perform(client));
+    TEST_ASSERT_EQUAL(400, esp_http_client_get_status_code(client));
+
+    esp_http_client_cleanup(client);
+}

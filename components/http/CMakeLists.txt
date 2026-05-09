@@ -6,7 +6,10 @@ idf_component_register(
     "include"
   PRIV_REQUIRES
     fatfs
+    app_update
     esp_event
+    esp_timer
+    esp_app_format
     vfs
     esp_netif
     nvs_flash
@@ -15,6 +18,7 @@ idf_component_register(
     esp_wifi
     lwip
   EMBED_FILES
+    "dashboard.html"
     "upload_script.html"
     "favicon.ico"
 )

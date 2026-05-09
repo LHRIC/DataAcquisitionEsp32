@@ -10,7 +10,7 @@ menu "HTTP file server menu"
 
         config ESP_WIFI_PASSWORD
             string "AP Password"
-            default "sawcon"
+            default "changeme123"
             help
                 Password for the access point. Leave empty for open network.
 
@@ -27,5 +27,14 @@ menu "HTTP file server menu"
             default 4
             help
                 Maximum number of stations that can connect to the AP.
+    endmenu
+
+    menu "Remote control API"
+        config HTTP_MONITOR_STREAM_INTERVAL_MS
+            int "Log stream poll interval (ms)"
+            range 250 10000
+            default 1000
+            help
+                Delay between polls while /api/monitor waits for new log lines.
     endmenu
 endmenu
