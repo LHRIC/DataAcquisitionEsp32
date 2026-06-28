@@ -1,0 +1,36 @@
+<script type="text/javascript">
+function upload() {
+    var fileInput = document.getElementById("newfile");
+    if (fileInput.files.length === 0) {
+        alert("Please choose a file");
+        return;
+    }
+
+    var file = fileInput.files[0];
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (xhttp.readyState == 4) {
+            if (xhttp.status == 200) {
+                document.open();
+                document.write(xhttp.responseText);
+                document.close();
+            } else if (xhttp.status == 0) {
+                alert("Server closed the connection abruptly!");
+                location.reload();
+            } else {
+                alert(xhttp.status + " Error!\n" + xhttp.responseText);
+                location.reload();
+            }
+        }
+    };
+
+    var upload_path = "/upload/" + file.name;
+    xhttp.open("POST", upload_path, true);
+    xhttp.send(file);
+}
+</script>
+<div>
+    <label for="newfile">Upload a file</label>
+    <input id="newfile" type="file" />
+    <button onclick="upload()">Upload</button>
+</div>

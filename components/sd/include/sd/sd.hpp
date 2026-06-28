@@ -5,6 +5,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+// Mount point for SD card
+static const char *MOUNT_POINT = "/sdcard";
+
 // SD card mode selection
 #define SD_USE_SDIO 1 // Set to 1 for SDIO, 0 for SPI
 
@@ -28,7 +31,7 @@ extern TaskHandle_t sd_task;
 
 
 // Configuration
-#define SD_WRITE_BATCH_SIZE 1024 // 1024 records * 17 bytes = ~17KB per buffer
+#define SD_WRITE_BATCH_SIZE 512 // 1024 records * 17 bytes = ~17KB per buffer
 #define SD_FLUSH_INTERVAL_MS 50  // Flush every 50ms or when buffer full
 
 

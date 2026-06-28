@@ -1,0 +1,20 @@
+idf_component_register(
+  SRCS
+    "src/http.c"
+    "src/file_server.c"
+  INCLUDE_DIRS
+    "include"
+  PRIV_REQUIRES
+    fatfs
+    esp_event
+    vfs
+    esp_netif
+    nvs_flash
+    spiffs
+    esp_http_server
+    esp_wifi
+    lwip
+  EMBED_FILES
+    "upload_script.html"
+    "favicon.ico"
+)
