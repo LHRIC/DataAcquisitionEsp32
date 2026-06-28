@@ -232,7 +232,7 @@ void sd_task_start(UBaseType_t prio, UBaseType_t stackWords, BaseType_t core)
 
 void sd_init()
 {
-    //TODO: Add SDIO card detect
+    // TODO: Add SDIO card detect
 
     // Create mutex and write task
     write_mutex = xSemaphoreCreateMutex();
@@ -248,7 +248,7 @@ void sd_init()
     host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
 
     sdmmc_slot_config_t slot_cfg = SDMMC_SLOT_CONFIG_DEFAULT();
-    slot_cfg.width = 4;
+    slot_cfg.width = 1;
     slot_cfg.clk = SD_PIN_CLK;
     slot_cfg.cmd = SD_PIN_CMD;
     slot_cfg.d0 = SD_PIN_D0;
@@ -363,7 +363,7 @@ void sd_init()
              g_card->log_bus_width == 0 ? 1
                                         : (g_card->log_bus_width == 1 ? 4 : 8));
 
-    // Always try to open a session file 
+    // Always try to open a session file
     if (open_new_session_file() != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to open initial session file");
@@ -385,13 +385,13 @@ bool sd_is_ready() { return g_card != NULL; }
  *
  * Waits for a task notification indicating that the `flush_write_buffer()`
  * has placed a buffer to be written to SD card and made persistent. Writes
- * pending bytes to the global `g_session`. 
+ * pending bytes to the global `g_session`.
  *
  * Calls `fflush()` and `fsync()` for durability, at the cost of speed.
  *
  * @note This task assumes g_session remains valid while a write is pending.
  *       Session rotation/close should ensure pending writes are handled safely.
-*/
+ */
 static void sd_write_task(void *arg)
 {
     uint32_t total_writes = 0;
@@ -490,15 +490,15 @@ static void sd_write_task(void *arg)
  * If there is no active session file, this function simply does nothing
  * (returning ESP_OK)
  *
- * @note This function does not guarantee that data has been written to 
+ * @note This function does not guarantee that data has been written to
  * disk. It only schedules the write. Durability is handled by `sd_write_task`
  *
- * @return 
+ * @return
  *      - ESP_OK on successful handoff to write task (nothing to flush)
  *      - ESP_ERR_TIMEOUT if a flush was dropped due to the writer being busy
  *
  * @warning Must not be called from interrupt contexts
-*/
+ */
 static esp_err_t flush_write_buffer()
 {
     if (!g_session || active_buffer_pos == 0)
